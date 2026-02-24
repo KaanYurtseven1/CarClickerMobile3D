@@ -29,6 +29,11 @@ public class NitroCoinSpawner : MonoBehaviour
         if (nitroCoinPrefab == null || spawnTop == null || spawnBottom == null)
             return;
 
+        // UI content-panel suppression: freeze timer while a panel is open.
+        // When the panel closes the timer continues from where it left off — no burst-spawn.
+        if (UIFlowState.IsSpawnSuppressed)
+            return;
+
         timer += Time.deltaTime;
         if (timer >= nextSpawnTime)
         {
@@ -53,7 +58,10 @@ public class NitroCoinSpawner : MonoBehaviour
         float x = Random.Range(minX, maxX);
         Vector3 pos = new Vector3(x, spawnTop.position.y, spawnTop.position.z);
 
-        GameObject obj = Instantiate(nitroCoinPrefab, pos, Quaternion.identity);
+        // Enforce Y=180 rotation so the coin faces the camera.
+        // Previous code used Quaternion.identity which zeroed all axes, overriding the prefab.
+        Quaternion spawnRot = Quaternion.Euler(0f, 180f, 0f);
+        GameObject obj = Instantiate(nitroCoinPrefab, pos, spawnRot);
 
         // Coin'e bottom Z bilgisini ver
         NitroCoin coin = obj.GetComponent<NitroCoin>();

@@ -114,6 +114,13 @@ public class NitroRainController : MonoBehaviour
     // Rain extension tracking
     private float _rainExtensionAccumulated = 0f;
 
+    // ==================== BOOST COORDINATION ====================
+    // When Boost Mode is Active, rain must not run. If rain was triggered
+    // while boost is active, _rainQueuedLevel stores the card level so
+    // rain can auto-start once boost finishes.
+    private int _rainQueuedLevel = 0;
+    private bool _subscribedToBoost = false;
+
     // ==================== PUBLIC PROPERTIES ====================
 
     /// <summary>
@@ -214,6 +221,7 @@ public class NitroRainController : MonoBehaviour
     {
         if (Instance == this) Instance = null;
         UnsubscribeSceneLoaded();
+        UnsubscribeFromBoost();
     }
 
     private void SubscribeSceneLoaded()
@@ -269,6 +277,8 @@ public class NitroRainController : MonoBehaviour
         EnsureSpawnerReference(true);
         // Initialize spawn distribution tracking
         InitializeSpawnLanes();
+        // Subscribe to BoostModeController events for mutual exclusion
+        TrySubscribeToBoost();
     }
 
     private void InitializeSpawnLanes()
@@ -291,6 +301,10 @@ public class NitroRainController : MonoBehaviour
 
     private void Update()
     {
+        // Lazy-bind to BoostModeController if it wasn't ready at Start()
+        if (!_subscribedToBoost)
+            TrySubscribeToBoost();
+
         float now = Time.time;
 
         // Robust spawner rebind during rain
@@ -333,7 +347,20 @@ public class NitroRainController : MonoBehaviour
                 // Check if delay has ended
                 if (now >= _stateEndTime)
                 {
-                    StartRain();
+                    // Gate: if Boost Mode is active, queue rain instead of starting it
+                    if (IsBoostBlocking())
+                    {
+                        int lvl = GetNitroRainCardLevel();
+                        _rainQueuedLevel = lvl >= 1 ? lvl : 1;
+                        _currentState = NitroRainState.Ready;
+                        _collectedCount = 0;
+                        _stateEndTime = 0f;
+                        Debug.Log($"[NitroRain] Delay ended but Boost active — rain queued at level {_rainQueuedLevel}.");
+                    }
+                    else
+                    {
+                        StartRain();
+                    }
                 }
                 break;
 
@@ -445,6 +472,16 @@ public class NitroRainController : MonoBehaviour
 
     private void StartDelay(int level)
     {
+        // Gate: if Boost Mode is active, queue rain instead of starting delay
+        if (IsBoostBlocking())
+        {
+            _rainQueuedLevel = level;
+            _currentState = NitroRainState.Ready;
+            _collectedCount = 0; // threshold was met, reset counter
+            Debug.Log($"[NitroRain] Boost active — rain queued at level {level} (will start after boost).");
+            return;
+        }
+
         _currentState = NitroRainState.PendingDelay;
         _stateEndTime = Time.time + delaySeconds;
 
@@ -642,6 +679,93 @@ public class NitroRainController : MonoBehaviour
     {
         float interval = UnityEngine.Random.Range(spawnIntervalMin, spawnIntervalMax);
         _nextSpawnTime = Time.time + interval;
+    }
+
+    // ==================== BOOST COORDINATION ====================
+
+    /// <summary>
+    /// Returns true if BoostModeController is in the Active state,
+    /// meaning rain must not run concurrently.
+    /// </summary>
+    private bool IsBoostBlocking()
+    {
+        return BoostModeController.Instance != null && BoostModeController.Instance.IsBoostActive;
+    }
+
+    private void TrySubscribeToBoost()
+    {
+        if (_subscribedToBoost) return;
+        if (BoostModeController.Instance == null) return;
+
+        BoostModeController.Instance.OnBoostStarted += HandleBoostStarted;
+        BoostModeController.Instance.OnBoostEnded += HandleBoostEnded;
+        _subscribedToBoost = true;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log("[NitroRain] Subscribed to BoostModeController events for mutual exclusion.");
+#endif
+    }
+
+    private void UnsubscribeFromBoost()
+    {
+        if (!_subscribedToBoost) return;
+        if (BoostModeController.Instance != null)
+        {
+            BoostModeController.Instance.OnBoostStarted -= HandleBoostStarted;
+            BoostModeController.Instance.OnBoostEnded -= HandleBoostEnded;
+        }
+        _subscribedToBoost = false;
+    }
+
+    /// <summary>
+    /// Called when Boost Mode becomes Active.
+    /// If rain is currently running or pending, interrupt and queue it.
+    /// </summary>
+    private void HandleBoostStarted(float duration)
+    {
+        if (_currentState == NitroRainState.Raining)
+        {
+            int level = GetNitroRainCardLevel();
+            _rainQueuedLevel = level >= 1 ? level : 1;
+
+            // Interrupt rain: reset state without going through full EndRain
+            // so the OnRainEnded event fires (VFX/UI can react)
+            _currentState = NitroRainState.Ready;
+            _collectedCount = 0;
+            _stateEndTime = 0f;
+            _nextSpawnTime = 0f;
+            _rainExtensionAccumulated = 0f;
+            OnRainEnded?.Invoke();
+
+            Debug.Log($"[NitroRain] Rain INTERRUPTED by Boost Mode. Queued at level {_rainQueuedLevel}.");
+        }
+        else if (_currentState == NitroRainState.PendingDelay)
+        {
+            int level = GetNitroRainCardLevel();
+            _rainQueuedLevel = level >= 1 ? level : 1;
+
+            // Cancel delay
+            _currentState = NitroRainState.Ready;
+            _collectedCount = 0;
+            _stateEndTime = 0f;
+
+            Debug.Log($"[NitroRain] Delay CANCELLED by Boost Mode. Queued at level {_rainQueuedLevel}.");
+        }
+    }
+
+    /// <summary>
+    /// Called when Boost Mode finishes (transitions out of Active).
+    /// If rain was queued, start it now.
+    /// </summary>
+    private void HandleBoostEnded()
+    {
+        if (_rainQueuedLevel > 0)
+        {
+            int level = _rainQueuedLevel;
+            _rainQueuedLevel = 0;
+            Debug.Log($"[NitroRain] Boost ended — starting queued rain at level {level}.");
+            StartRain(level);
+        }
     }
 
     // ==================== DEBUG ====================

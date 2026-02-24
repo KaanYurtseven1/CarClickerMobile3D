@@ -207,12 +207,13 @@ Transform:
   m_GameObject: {fileID: 3751765518473777022}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.3, y: 0.3, z: 0.3}
+  m_LocalPosition: {x: 0, y: 10, z: 0}
+  m_LocalScale: {x: 0.7, y: 0.7, z: 0.7}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 4395223411953325707}
   - {fileID: 1182917921189239272}
+  - {fileID: 4694493904920335285}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &2499817425226813987
@@ -269,8 +270,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 1.8709732, y: 2.629183, z: 4.2301707}
-  m_Center: {x: -0.013677378, y: 6.80104, z: -0.04841367}
+  m_Size: {x: 1.8709732, y: 2.629183, z: 4.3700366}
+  m_Center: {x: 0, y: 0, z: -0.06993294}
 --- !u!114 &4375041384210075853
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -292,6 +293,37 @@ MonoBehaviour:
   shakeDuration: 0.25
   shakeStrength: 0.1
   shakeVibrato: 10
+--- !u!1 &3942054916516897344
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4694493904920335285}
+  m_Layer: 7
+  m_Name: CardMouthAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4694493904920335285
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3942054916516897344}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6038870343702328410}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &5773984116491102526
 GameObject:
   m_ObjectHideFlags: 0
@@ -470,7 +502,7 @@ Transform:
   m_GameObject: {fileID: 7937563968479507512}
   serializedVersion: 2
   m_LocalRotation: {x: -0.7071068, y: 0, z: -0, w: 0.7071067}
-  m_LocalPosition: {x: -0, y: 6.7986217, z: 0}
+  m_LocalPosition: {x: -0, y: 0, z: 0}
   m_LocalScale: {x: 100, y: 100, z: 100}
   m_ConstrainProportionsScale: 0
   m_Children:

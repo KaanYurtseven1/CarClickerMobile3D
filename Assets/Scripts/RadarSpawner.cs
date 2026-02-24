@@ -37,6 +37,11 @@ public class RadarSpawner : MonoBehaviour
         if (radarPrefab == null) return;
         if (spawnPointLeft == null && spawnPointRight == null) return;
 
+        // UI content-panel suppression: freeze timer while a panel is open.
+        // When the panel closes the timer resumes — no burst-spawn.
+        if (UIFlowState.IsSpawnSuppressed)
+            return;
+
         timer += Time.deltaTime;
         if (timer >= nextSpawnTime)
         {

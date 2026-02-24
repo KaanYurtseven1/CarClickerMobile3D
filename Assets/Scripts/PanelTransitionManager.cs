@@ -61,6 +61,9 @@ public class PanelTransitionManager : MonoBehaviour
 
         if (topBarAnimator != null)
             topBarAnimator.SetCompact(false); // normal
+
+        // Ensure suppression is OFF at scene start (Clicker is default)
+        UIFlowState.IsContentPanelOpen = false;
     }
 
     public void SwitchTo(BottomTab targetTab)
@@ -71,6 +74,12 @@ public class PanelTransitionManager : MonoBehaviour
         RectTransform targetPanel = GetPanel(targetTab);
         bool isGoingToClicker = (targetTab == BottomTab.Clicker);
         bool isCurrentlyPanelOpen = (currentPanel != null);
+
+        // ── UI-flow suppression: set IMMEDIATELY so spawners/taps freeze
+        //    even while the panel-open animation is playing. ──
+        bool suppress = !isGoingToClicker;
+        UIFlowState.IsContentPanelOpen = suppress;
+        Debug.Log($"[PanelTransitionManager] SwitchTo {targetTab} — UIFlowState.IsContentPanelOpen = {suppress}");
 
         if (seq != null && seq.IsActive()) seq.Kill();
 

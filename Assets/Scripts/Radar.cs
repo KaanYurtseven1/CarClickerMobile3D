@@ -33,12 +33,18 @@ public class Radar : MonoBehaviour
     [SerializeField] private float despawnZ = -15f;
 
     [Header("Popularity")]
-    [Tooltip("How much normalized popularity (0..1) to add when the player misses this radar.")]
-    [SerializeField] private float popularityDelta = 0.05f;
+    [Tooltip("Normalized popularity increment per miss. 0.01 = +1 on the 0–100 scale.")]
+    [SerializeField] private float popularityDelta = 0.01f;
+
+    [Header("Debug")]
+    [Tooltip("Log miss handling details to console.")]
+    [SerializeField] private bool enableDebug = false;
 
     // ==================== STATE ====================
 
     private bool isAlive = true;
+    /// <summary>Unified guard: ensures popularity logic (miss OR defuse) fires at most once per instance.</summary>
+    private bool _handled = false;
 
     // ==================== LIFECYCLE ====================
 
@@ -84,6 +90,17 @@ public class Radar : MonoBehaviour
         if (!isAlive) return;
         isAlive = false;
 
+        // ---- Popularity decrease (defuse) ----
+        if (!_handled)
+        {
+            _handled = true;
+            if (PopularityManager.Instance != null)
+            {
+                PopularityManager.Instance.AddPopularityNormalized(
+                    -popularityDelta, "RadarDefuse", this);
+            }
+        }
+
         // Try animated vanish (with shake); fallback to instant destroy
         TapVanishAnimator vanish = GetComponent<TapVanishAnimator>();
         if (vanish != null && !vanish.IsPlaying)
@@ -120,13 +137,24 @@ public class Radar : MonoBehaviour
         if (!isAlive) return;
         isAlive = false;
 
-        // Increase popularity
+        // Unified guard: only one popularity change (miss OR defuse) per radar instance
+        if (_handled)
+        {
+            if (enableDebug)
+                Debug.Log($"[Radar] {name} OnMissed BLOCKED (_handled already true)");
+            Destroy(gameObject);
+            return;
+        }
+        _handled = true;
+
+        // Increase popularity by exactly +1 on the 0–100 scale (0.01 normalized)
         if (PopularityManager.Instance != null)
         {
-            PopularityManager.Instance.Increase(popularityDelta);
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"[Radar] Missed! Popularity +{popularityDelta:F2} → now {PopularityManager.Instance.Popularity01:P0}");
-#endif
+            PopularityManager.Instance.AddPopularityNormalized(
+                popularityDelta, "RadarMiss", this);
+
+            // Fire radar photo event (drives PoliceCatchTrigger counter)
+            PopularityManager.Instance.NotifyRadarPhotoTaken();
         }
         else
         {

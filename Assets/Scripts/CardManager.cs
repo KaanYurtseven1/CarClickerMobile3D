@@ -95,6 +95,65 @@ public class CardManager : MonoBehaviour
     // [REMOVED] PurgeStaleNitroPickupTimes — legacy rate-based NitroMagnet system.
     // NitroMagnet is now handled by NitroMagnetController.
 
+    // ----------------- Card Progress (canonical calculation) -----------------
+
+    /// <summary>
+    /// Holds progress data for a single card, matching the Card Collection UI logic exactly.
+    /// </summary>
+    public struct CardProgressData
+    {
+        public int level;
+        public int currentCopies;   // clamped segment count (0..8)
+        public int rawCopies;       // unclamped actual segment balance
+        public int requiredCopies;  // always 8
+        public float fill01;        // 0..1 normalized progress
+        public bool isMaxLevel;     // always false (infinite levels)
+    }
+
+    /// <summary>
+    /// Computes card progress using the SAME logic as CardDefinition.GetUpgradeProgress01()
+    /// and CardSlotUI / CardDetailPopupController.
+    ///
+    /// <param name="type">Card type to query.</param>
+    /// <param name="extraCopiesForPreview">Extra copies to add for preview (e.g. chest reward).
+    /// These are NOT committed — only used for the calculation.</param>
+    /// </summary>
+    public CardProgressData GetCardProgress(CardType type, int extraCopiesForPreview = 0)
+    {
+        CardProgressData data = default;
+
+        CardDefinition def = GetCard(type);
+        if (def == null)
+        {
+            Debug.LogWarning($"[CardManager] GetCardProgress: card {type} not found.");
+            return data;
+        }
+
+        // Simulate the state AFTER adding extra segments (same as AddCardCopies logic)
+        int simSegments = def.copiesOwned + extraCopiesForPreview;
+        int simLevel = def.currentLevel;
+
+        // Auto-unlock: if card was L0 and now has segments, it becomes L1
+        // (mirrors AddCardCopies auto-unlock behavior)
+        if (simLevel == 0 && simSegments > 0)
+            simLevel = 1;
+
+        data.level = simLevel;
+        data.rawCopies = simSegments;
+        data.isMaxLevel = false; // infinite levels — never max
+
+        // 8-segment model: always need 8
+        int need = CardDropTuning.SegmentsPerUpgrade;
+        data.requiredCopies = need;
+
+        // Clamp displayed segments to [0, 8]
+        int clamped = Mathf.Clamp(simSegments, 0, need);
+        data.currentCopies = clamped;
+        data.fill01 = (float)clamped / need;
+
+        return data;
+    }
+
     // ----------------- Genel yardımcılar -----------------
 
     public CardDefinition GetCard(CardType type)
@@ -119,9 +178,9 @@ public class CardManager : MonoBehaviour
     }
 
     /// <summary>
-    /// UI'da "Upgrade" tuşuna basıldığında çağrılacak ana fonksiyon.
-    /// Progression: L1->L2 needs 2 copies, L2->L3 needs 3, etc.
-    /// Max level is 6.
+    /// Called when the player presses the Upgrade button.
+    /// 8-segment model: requires segmentBalance >= 8 and enough money.
+    /// Levels are infinite (no max cap).
     /// </summary>
     public bool TryUpgradeCard(CardType type)
     {
@@ -130,21 +189,12 @@ public class CardManager : MonoBehaviour
         CardDefinition c = GetCard(type);
         if (c == null) return false;
 
-        // Check max level (hard cap at 6)
-        if (c.IsMaxLevel)
+        // Check segment balance (need 8)
+        int needed = CardDropTuning.SegmentsPerUpgrade;
+        if (c.copiesOwned < needed)
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"[CardManager] Max level reached for card: {c.displayName} (Level {c.currentLevel})");
-#endif
-            return false;
-        }
-
-        // Calculate copies needed: currentLevel + 1
-        int neededCopies = c.GetCopiesRequiredForNextLevel();
-        if (c.copiesOwned < neededCopies)
-        {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"[CardManager] Not enough copies for upgrade: {c.displayName}. Have: {c.copiesOwned}, Need: {neededCopies}");
+            Debug.Log($"[CardManager] Not enough segments for upgrade: {c.displayName}. Have: {c.copiesOwned}, Need: {needed}");
 #endif
             return false;
         }
@@ -158,15 +208,15 @@ public class CardManager : MonoBehaviour
             return false;
         }
 
-        // Successful upgrade: spend copies, increment level
-        c.copiesOwned -= neededCopies;
+        // Successful upgrade: subtract 8 segments (keep remainder), increment level
+        c.copiesOwned -= needed;
         c.currentLevel++;
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-        Debug.Log($"[CardManager] Upgraded {c.displayName} to Level {c.currentLevel}. Copies remaining: {c.copiesOwned}");
+        Debug.Log($"[CardManager] Upgraded {c.displayName} to Level {c.currentLevel}. Segments remaining: {c.copiesOwned}");
 #endif
 
-        // Efekti yeniden uygula
+        // Re-apply card effect at new level
         ApplyCardEffect(type);
 
         // Fire event for UI refresh (CardCollectionUI should subscribe to this)
@@ -334,11 +384,8 @@ public class CardManager : MonoBehaviour
 #endif
 
         // Fire event for UI refresh
+        // (CardCollectionUI subscribes to OnCardsChanged — no direct Rebuild call needed)
         OnCardsChanged?.Invoke();
-
-        // UI yenile (direct call as fallback)
-        if (CardCollectionUI.Instance != null)
-            CardCollectionUI.Instance.Rebuild();
     }
 
     // ----------------- Notify Methods (Runtime Activation) -----------------

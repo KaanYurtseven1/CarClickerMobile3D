@@ -138,14 +138,11 @@ public class SaveSystem : MonoBehaviour
     {
         yield return null;
         Time.timeScale = 1f;
-        if (!_hasLoadedThisSession)
-        {
-            LoadGame();
-        }
-        else
-        {
-            Debug.Log("[SaveSystem] LoadAfterScene skipped — already loaded this session.");
-        }
+
+        // Always reload when returning to Main (e.g. from ChestOpenScene).
+        // New scene objects need their saved state applied even if we loaded before.
+        Debug.Log($"[SaveSystem] LoadAfterScene — loading game (hasLoadedBefore={_hasLoadedThisSession}).");
+        LoadGame();
     }
 
     // ---------- SAVE ----------
@@ -215,6 +212,12 @@ public class SaveSystem : MonoBehaviour
         if (PopularityManager.Instance != null)
         {
             PlayerPrefs.SetFloat("Save_Popularity01", PopularityManager.Instance.Popularity01);
+        }
+
+        // PoliceCatchTrigger: radar catch counter + pending flag
+        if (PoliceCatchTrigger.Instance != null)
+        {
+            PoliceCatchTrigger.Instance.SaveState();
         }
 
         PlayerPrefs.SetInt("HasSave", 1);
@@ -324,7 +327,14 @@ public class SaveSystem : MonoBehaviour
         if (PopularityManager.Instance != null)
         {
             float savedPop = PlayerPrefs.GetFloat("Save_Popularity01", 0f);
-            PopularityManager.Instance.Set(savedPop);
+            PopularityManager.Instance.Set(savedPop, "SaveSystem.LoadGame");
+        }
+
+        // PoliceCatchTrigger: radar catch counter + pending flag
+        // Load state first, then after all init is done call TryFirePendingPoliceCatch()
+        if (PoliceCatchTrigger.Instance != null)
+        {
+            PoliceCatchTrigger.Instance.LoadState();
         }
 
         // Safety: ensure police chase is not active on load
@@ -349,6 +359,14 @@ public class SaveSystem : MonoBehaviour
 
         // Notify subscribers that game data is now loaded
         OnGameLoaded?.Invoke();
+
+        // After all systems are initialized, check if there's a pending Police Chase
+        // from a previous session. This does NOT start it immediately — it waits
+        // until the next radar popup closes (deterministic, safe rule).
+        if (PoliceCatchTrigger.Instance != null)
+        {
+            PoliceCatchTrigger.Instance.TryFirePendingPoliceCatch();
+        }
     }
 
     private double GetDouble(string key, double defaultValue)

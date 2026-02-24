@@ -184,7 +184,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Radar
   moveSpeed: 0
   despawnZ: -15
-  popularityDelta: 0.05
+  popularityDelta: 0.01
+  enableDebug: 0
 --- !u!114 &1850730412237297339
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -55,6 +55,10 @@ public class BuildingManager : MonoBehaviour
         ResetAllBuildingCounts();
 
         InitializeLookup();
+
+        Debug.Log($"[BuildingManager] Awake complete — Instance set, " +
+                  $"buildings.Length={buildings?.Length ?? 0}, " +
+                  $"lookupKeys={_buildingLookup?.Count ?? 0}");
     }
 
     /// <summary>

@@ -150,9 +150,10 @@ public class DailyOffersController : MonoBehaviour
 
     /// <summary>
     /// Selection algorithm:
-    ///   1. Gather all cards that are NOT max-level.
-    ///   2. Sort by: lowest currentLevel ASC, then smallest (copiesNeeded - copiesOwned) ASC.
+    ///   1. Gather all cards.
+    ///   2. Sort by: lowest currentLevel ASC, then fewest segments-toward-upgrade ASC.
     ///   3. Slot 2 gets best candidate, Slot 3 gets second best.
+    /// No max-level filter — levels are infinite.
     /// </summary>
     private void PickDailyCards()
     {
@@ -189,19 +190,18 @@ public class DailyOffersController : MonoBehaviour
         foreach (var card in CardManager.Instance.cards)
         {
             if (card == null) continue;
-            if (card.IsMaxLevel) continue;
+            // No max-level filter — levels are infinite
             list.Add(card);
         }
 
-        // Sort: lowest level first, then smallest remaining-copies-needed first
+        // Sort: lowest level first, then fewest segments toward next upgrade
         list.Sort((a, b) =>
         {
             int levelCmp = a.currentLevel.CompareTo(b.currentLevel);
             if (levelCmp != 0) return levelCmp;
 
-            int aNeed = a.GetCopiesRequiredForNextLevel() - a.copiesOwned;
-            int bNeed = b.GetCopiesRequiredForNextLevel() - b.copiesOwned;
-            return aNeed.CompareTo(bNeed);
+            // Fewer segments owned = further from upgrade = higher priority to offer
+            return a.copiesOwned.CompareTo(b.copiesOwned);
         });
 
         return list;
@@ -332,16 +332,11 @@ public class DailyOffersController : MonoBehaviour
             return;
         }
 
-        // Check card exists and is not max level
+        // Check card exists
         CardDefinition card = CardManager.Instance.GetCard(cardType);
         if (card == null)
         {
             Debug.LogWarning($"[DailyOffers] Card {cardType} not found.");
-            return;
-        }
-        if (card.IsMaxLevel)
-        {
-            Debug.Log($"[DailyOffers] Card {cardType} is already max level.");
             return;
         }
 
@@ -421,19 +416,15 @@ public class DailyOffersController : MonoBehaviour
         // Icon
         slot.SetIcon(card.icon);
 
-        // Progress bar
+        // Progress bar (segmented)
         float progress = card.GetUpgradeProgress01();
         string progressTxt = card.GetUpgradeProgressText();
         slot.SetProgress(progress, progressTxt);
 
-        // Available / bought
+        // Available / bought (no max-level state)
         if (bought)
         {
             slot.SetPurchased("PURCHASED");
-        }
-        else if (card.IsMaxLevel)
-        {
-            slot.SetPurchased("MAX LEVEL");
         }
         else
         {

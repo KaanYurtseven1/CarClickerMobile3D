@@ -19,7 +19,7 @@ public class ChestSpawner : MonoBehaviour
 
     [Header("Height Fix")]
     public bool useFixedY = true;
-    public float fixedY = -1.64f;
+    public float fixedY = 0.35f;
 
     [Header("Rotation")]
     [Tooltip("true = prefab'ın kendi rotasyonunu kullan, false = spawnTop rotasyonunu kullan")]
@@ -57,7 +57,18 @@ public class ChestSpawner : MonoBehaviour
         while (true)
         {
             float wait = Random.Range(minSpawnInterval, maxSpawnInterval);
-            yield return new WaitForSeconds(wait);
+
+            // Manual timer loop: freeze while UI content panel is open.
+            // WaitForSeconds cannot be paused, so we tick manually.
+            float elapsed = 0f;
+            while (elapsed < wait)
+            {
+                yield return null;
+                // UI content-panel suppression: skip deltaTime accumulation.
+                if (UIFlowState.IsSpawnSuppressed)
+                    continue;
+                elapsed += UnityEngine.Time.deltaTime;
+            }
 
             SpawnChest();
         }

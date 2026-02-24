@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: be559fa8356d41f488145bf8921e4784, type: 3}
+  m_Name: Theme_NitroMagnet
+  m_EditorClassIdentifier: Assembly-CSharp::CardPopupThemeSO
+  type: 7
+  popupPanelSprite: {fileID: 21300000, guid: 370d63f846674ca4086b8df2d43a1f6e, type: 3}
+  upgradeButtonSprite: {fileID: 21300000, guid: 37c2d3a7d8d241647a9eca87d06c2d9f, type: 3}
+  displayNameOverride: NITRO MAGNET
+  valueText: 
+  descriptionText: 

@@ -88,6 +88,14 @@ public class TapInputRaycaster : MonoBehaviour
             return;
         }
 
+        // UI content-panel suppression gate (Bank / ShopCards / TimeWarp / Ranking open)
+        // Police chase taps must still work even when a panel is open,
+        // so this gate only applies to normal gameplay taps.
+        if (UIFlowState.IsTapSuppressed && !isPoliceChaseActive)
+        {
+            return;
+        }
+
         Vector2 screenPos = Vector2.zero;
         bool inputDetected = false;
 

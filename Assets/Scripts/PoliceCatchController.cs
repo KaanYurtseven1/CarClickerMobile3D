@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 using TMPro;
 using System.Collections;
 using DG.Tweening;
@@ -42,10 +43,18 @@ public class PoliceCatchController : MonoBehaviour
     [Tooltip("Duration per required tap (seconds). E.g. 3x = 3 * 0.5 = 1.5s.")]
     [SerializeField] private float secondsPerTap = 0.5f;
 
-    [Header("Car Animation")]
-    [Tooltip("Local-space offset applied to player car when chase starts (positive Y = up on screen).")]
-    [SerializeField] private Vector3 playerCarEnterOffset = new Vector3(0f, 0f, 0.6f);
-    [Tooltip("Duration of car enter/exit movement.")]
+    [Header("Car Z-Offset Pop")]
+    [Tooltip("Z-axis local offset applied to player car when chase begins (positive = forward).")]
+    [SerializeField] private float zPopOffset = 0.6f;
+    [Tooltip("Duration of Z-offset enter/exit pop (seconds).")]
+    [SerializeField] private float zPopDuration = 0.25f;
+    [Tooltip("Ease curve for Z-offset pop. If empty/no keys, defaults to InOutSine.")]
+    [SerializeField] private AnimationCurve zPopEaseCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+    [Tooltip("Log Z-pop enter/exit transitions to console.")]
+    [SerializeField] private bool enableZPopLogs = false;
+
+    [Header("Police Car Animation")]
+    [Tooltip("Duration of police car enter/exit movement.")]
     [SerializeField] private float moveDuration = 0.6f;
 
     [Header("Police Car Positions")]
@@ -100,6 +109,12 @@ public class PoliceCatchController : MonoBehaviour
     // Reference to TapInputRaycaster for chase flag
     private TapInputRaycaster _tapInput;
 
+    // Z-pop tween handle (interruption-safe: kill before starting a new one)
+    private Tweener _zPopTween;
+
+    // Scene-loaded subscription guard
+    private bool _sceneLoadedSubscribed = false;
+
     // ==================== LIFECYCLE ====================
 
     private void Awake()
@@ -114,8 +129,15 @@ public class PoliceCatchController : MonoBehaviour
             return;
         }
 
-        if (uiRoot != null)
-            uiRoot.SetActive(false);
+        // Ensure UI is disabled immediately — BEFORE any other script can see it
+        ForceHideUI();
+    }
+
+    private void OnEnable()
+    {
+        // Every time this component enables (including scene load), force UI off
+        ForceHideUI();
+        SubscribeSceneLoaded();
     }
 
     private void Start()
@@ -134,6 +156,14 @@ public class PoliceCatchController : MonoBehaviour
         // Capture default timer fill color for flash resets
         if (timerFill != null)
             _timerFillDefaultColor = timerFill.color;
+
+        // Redundant safety: ensure UI is still off after all Awake/OnEnable ran
+        ForceHideUI();
+    }
+
+    private void OnDisable()
+    {
+        UnsubscribeSceneLoaded();
     }
 
     private void OnDestroy()
@@ -142,18 +172,220 @@ public class PoliceCatchController : MonoBehaviour
         if (Instance == this)
             Instance = null;
 
+        UnsubscribeSceneLoaded();
+
         // Safety: ensure tap isolation is cleared if this object is destroyed mid-chase
         if (_tapInput != null)
             _tapInput.isPoliceChaseActive = false;
 
         // Kill any lingering DOTween animations
         StopSway();
+        _zPopTween?.Kill();
+        _zPopTween = null;
         if (playerCar != null) playerCar.DOKill();
         if (policeCar != null) policeCar.DOKill();
         if (timerFill != null)
         {
             timerFill.DOKill();
             timerFill.rectTransform.DOKill();
+        }
+    }
+
+    // ==================== SCENE LOAD ====================
+
+    private void SubscribeSceneLoaded()
+    {
+        if (!_sceneLoadedSubscribed)
+        {
+            SceneManager.sceneLoaded += OnSceneLoaded;
+            _sceneLoadedSubscribed = true;
+        }
+    }
+
+    private void UnsubscribeSceneLoaded()
+    {
+        if (_sceneLoadedSubscribed)
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+            _sceneLoadedSubscribed = false;
+        }
+    }
+
+    /// <summary>
+    /// Called when any scene finishes loading. Ensures PoliceCatchUI is OFF
+    /// unless an active chase is in progress (which should never happen on load).
+    /// Also re-acquires scene references that were lost due to DontDestroyOnLoad.
+    /// </summary>
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        Debug.Log($"[PoliceCatch] OnSceneLoaded({scene.name}) — state={_state}, uiRoot={(uiRoot != null ? uiRoot.name : "NULL")}");
+
+        // Re-acquire scene references when Main loads (they go null after DDOL scene switch)
+        if (scene.name == "Main")
+        {
+            RebindSceneReferences();
+        }
+
+        if (_state == ChaseState.Idle)
+        {
+            ForceHideUI();
+            Debug.Log($"[PoliceCatch] OnSceneLoaded({scene.name}) — UI forced OFF (state=Idle).");
+        }
+    }
+
+    /// <summary>
+    /// Re-acquires serialized references that point to Main scene objects.
+    /// Required because this component lives on a DontDestroyOnLoad GameManager,
+    /// so after switching to ChestOpenScene and back, all scene references become null.
+    /// </summary>
+    private void RebindSceneReferences()
+    {
+        // --- uiRoot (PoliceCatchUI) ---
+        if (uiRoot == null)
+        {
+            GameObject found = GameObject.Find("PoliceCatchUI");
+            if (found != null)
+            {
+                uiRoot = found;
+                Debug.Log("[PoliceCatch] RebindSceneReferences: uiRoot re-acquired by name.");
+            }
+            else
+            {
+                Debug.LogWarning("[PoliceCatch] RebindSceneReferences: PoliceCatchUI not found in scene!");
+            }
+        }
+
+        // --- TapInputRaycaster ---
+        if (_tapInput == null)
+        {
+            _tapInput = FindFirstObjectByType<TapInputRaycaster>();
+            if (_tapInput != null)
+                Debug.Log("[PoliceCatch] RebindSceneReferences: TapInputRaycaster re-acquired.");
+        }
+
+        // --- playerCar ---
+        if (playerCar == null)
+        {
+            GameObject carObj = GameObject.FindWithTag("Car");
+            if (carObj != null)
+            {
+                playerCar = carObj.transform;
+                Debug.Log("[PoliceCatch] RebindSceneReferences: playerCar re-acquired via tag.");
+            }
+        }
+
+        // --- policeCar ---
+        if (policeCar == null)
+        {
+            GameObject policeObj = GameObject.Find("PoliceCar");
+            if (policeObj != null)
+            {
+                policeCar = policeObj.transform;
+                policeCar.localPosition = policeHiddenLocalPos;
+                policeCar.gameObject.SetActive(false);
+                Debug.Log("[PoliceCatch] RebindSceneReferences: policeCar re-acquired by name.");
+            }
+        }
+
+        // --- UI sub-elements (search under uiRoot) ---
+        if (uiRoot != null)
+        {
+            if (promptText == null)
+            {
+                var tmp = uiRoot.GetComponentInChildren<TMPro.TMP_Text>(true);
+                if (tmp != null)
+                {
+                    promptText = tmp;
+                    Debug.Log("[PoliceCatch] RebindSceneReferences: promptText re-acquired.");
+                }
+            }
+            if (timerFill == null)
+            {
+                var fill = uiRoot.GetComponentInChildren<Image>(true);
+                // timerFill is a fill-type Image; find the one that isn't Dim_BG
+                var images = uiRoot.GetComponentsInChildren<Image>(true);
+                foreach (var img in images)
+                {
+                    if (img.type == Image.Type.Filled)
+                    {
+                        timerFill = img;
+                        _timerFillDefaultColor = timerFill.color;
+                        Debug.Log("[PoliceCatch] RebindSceneReferences: timerFill re-acquired.");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Ensure tap isolation is off when idle
+        if (_state == ChaseState.Idle && _tapInput != null)
+            _tapInput.isPoliceChaseActive = false;
+    }
+
+    /// <summary>
+    /// Unconditionally hides the police chase UI and police car.
+    /// If uiRoot is null (lost after scene switch), attempts to find it by name.
+    /// Also ensures CanvasGroup is non-blocking when hidden.
+    /// Safe to call multiple times.
+    /// </summary>
+    private void ForceHideUI()
+    {
+        // If uiRoot reference was lost (DDOL scene switch), try to find it
+        if (uiRoot == null)
+        {
+            GameObject found = GameObject.Find("PoliceCatchUI");
+            if (found != null)
+            {
+                uiRoot = found;
+                Debug.Log("[PoliceCatch] ForceHideUI — uiRoot was NULL, re-acquired by name.");
+            }
+        }
+
+        if (uiRoot != null)
+        {
+            if (uiRoot.activeSelf)
+            {
+                uiRoot.SetActive(false);
+                Debug.Log("[PoliceCatch] ForceHideUI — uiRoot disabled.");
+            }
+
+            // Ensure CanvasGroup does not block raycasts when hidden
+            EnsureCanvasGroupNonBlocking(uiRoot);
+
+            // Notify guard (handles Dim_BG image raycast targets)
+            var guard = uiRoot.GetComponent<PoliceCatchUIGuard>();
+            if (guard != null) guard.OnHide();
+        }
+    }
+
+    /// <summary>
+    /// If the given GameObject has a CanvasGroup (or we add one),
+    /// set it to non-blocking and non-interactable.
+    /// </summary>
+    private void EnsureCanvasGroupNonBlocking(GameObject go)
+    {
+        if (go == null) return;
+        CanvasGroup cg = go.GetComponent<CanvasGroup>();
+        if (cg == null)
+            cg = go.AddComponent<CanvasGroup>();
+
+        cg.alpha = 0f;
+        cg.interactable = false;
+        cg.blocksRaycasts = false;
+    }
+
+    /// <summary>
+    /// Restores CanvasGroup to visible/interactive state when showing the UI.
+    /// </summary>
+    private void EnsureCanvasGroupBlocking(GameObject go)
+    {
+        if (go == null) return;
+        CanvasGroup cg = go.GetComponent<CanvasGroup>();
+        if (cg != null)
+        {
+            cg.alpha = 1f;
+            cg.interactable = true;
+            cg.blocksRaycasts = true;
         }
     }
 
@@ -237,7 +469,16 @@ public class PoliceCatchController : MonoBehaviour
 
         // Show UI
         if (uiRoot != null)
+        {
             uiRoot.SetActive(true);
+            EnsureCanvasGroupBlocking(uiRoot);
+
+            // Notify guard (restores Dim_BG image raycast targets)
+            var guard = uiRoot.GetComponent<PoliceCatchUIGuard>();
+            if (guard != null) guard.OnShow();
+
+            Debug.Log("[PoliceCatch] Chase UI shown — CanvasGroup set to blocking.");
+        }
 
         UpdateWastedUI();
 
@@ -333,7 +574,16 @@ public class PoliceCatchController : MonoBehaviour
         _state = ChaseState.Exit;
 
         if (uiRoot != null)
+        {
             uiRoot.SetActive(false);
+            EnsureCanvasGroupNonBlocking(uiRoot);
+
+            // Notify guard
+            var guard = uiRoot.GetComponent<PoliceCatchUIGuard>();
+            if (guard != null) guard.OnHide();
+
+            Debug.Log("[PoliceCatch] Chase UI hidden — CanvasGroup set to non-blocking.");
+        }
 
         yield return StartCoroutine(AnimateExit());
 
@@ -592,20 +842,34 @@ public class PoliceCatchController : MonoBehaviour
     private IEnumerator AnimateEnter()
     {
         // Kill any prior tweens on these transforms
+        _zPopTween?.Kill();
+        _zPopTween = null;
         if (playerCar != null) playerCar.DOKill();
         if (policeCar != null) policeCar.DOKill();
 
-        Vector3 carEnd = _playerCarOriginalLocal + playerCarEnterOffset;
-
         Sequence seq = DOTween.Sequence();
 
+        // Player car Z-pop (only Z axis — preserves X/Y)
         if (playerCar != null)
-            seq.Join(playerCar.DOLocalMove(carEnd, moveDuration).SetEase(Ease.OutSine));
+        {
+            float targetZ = _playerCarOriginalLocal.z + zPopOffset;
+            _zPopTween = playerCar.DOLocalMoveZ(targetZ, zPopDuration);
+            if (zPopEaseCurve != null && zPopEaseCurve.length > 0)
+                _zPopTween.SetEase(zPopEaseCurve);
+            else
+                _zPopTween.SetEase(Ease.InOutSine);
+            seq.Join(_zPopTween);
 
+            if (enableZPopLogs)
+                Debug.Log($"[PoliceCatch Z-Pop] ENTER: Z {_playerCarOriginalLocal.z:F3} → {targetZ:F3} over {zPopDuration:F2}s");
+        }
+
+        // Police car slides in
         if (policeCar != null)
             seq.Join(policeCar.DOLocalMove(policeChaseLocalPos, moveDuration).SetEase(Ease.OutCubic));
 
         yield return seq.WaitForCompletion();
+        _zPopTween = null;
 
         // Start police sway
         StartSway();
@@ -616,18 +880,47 @@ public class PoliceCatchController : MonoBehaviour
         // Stop sway first
         StopSway();
 
+        _zPopTween?.Kill();
+        _zPopTween = null;
         if (playerCar != null) playerCar.DOKill();
         if (policeCar != null) policeCar.DOKill();
 
+        // Build a sequential exit: police car retreats FIRST, then player car Z-pop returns.
         Sequence seq = DOTween.Sequence();
 
-        if (playerCar != null)
-            seq.Join(playerCar.DOLocalMove(_playerCarOriginalLocal, moveDuration).SetEase(Ease.InOutSine));
-
+        // Phase 1: Police car slides out to hidden position
         if (policeCar != null)
-            seq.Join(policeCar.DOLocalMove(_policeCarOriginalLocal, moveDuration).SetEase(Ease.InCubic));
+        {
+            seq.Append(policeCar.DOLocalMove(_policeCarOriginalLocal, moveDuration).SetEase(Ease.InCubic));
+
+            if (enableZPopLogs)
+                Debug.Log($"[PoliceCatch Exit] Police car sliding to hidden pos over {moveDuration:F2}s");
+        }
+
+        // Phase 2: After police car finishes, player car Z-pop returns to original Z
+        if (playerCar != null)
+        {
+            float currentZ = playerCar.localPosition.z;
+            float targetZ = _playerCarOriginalLocal.z;
+
+            seq.AppendCallback(() =>
+            {
+                if (enableZPopLogs)
+                    Debug.Log($"[PoliceCatch Z-Pop] EXIT: Z {playerCar.localPosition.z:F3} → {targetZ:F3} over {zPopDuration:F2}s");
+
+                // Kill any lingering Z-pop tween before starting return
+                _zPopTween?.Kill();
+                _zPopTween = playerCar.DOLocalMoveZ(targetZ, zPopDuration);
+                if (zPopEaseCurve != null && zPopEaseCurve.length > 0)
+                    _zPopTween.SetEase(zPopEaseCurve);
+                else
+                    _zPopTween.SetEase(Ease.InOutSine);
+            });
+            seq.AppendInterval(zPopDuration); // wait for Z-pop to finish
+        }
 
         yield return seq.WaitForCompletion();
+        _zPopTween = null;
     }
 
     private void StartSway()

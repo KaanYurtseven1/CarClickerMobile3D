@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f54dee825c3ef264ca46b4648404147b, type: 3}
+  m_Name: CardPopupThemeDatabase
+  m_EditorClassIdentifier: Assembly-CSharp::CardPopupThemeDatabaseSO
+  themes:
+  - {fileID: 11400000, guid: 96accb7128f74184dad18e665751504f, type: 2}
+  - {fileID: 11400000, guid: 84554aa0d799a3341ab86d6138e62a93, type: 2}
+  - {fileID: 11400000, guid: 5b3fbc5f016218045b32eabb390c6ac9, type: 2}
+  - {fileID: 11400000, guid: e40a94e954c74b34093f56d9f1609fdb, type: 2}
+  - {fileID: 11400000, guid: a91c09c9506379f449e7ece74de803cc, type: 2}
+  - {fileID: 11400000, guid: c6dc6d7b5391fa64888d881b45efa751, type: 2}
+  - {fileID: 11400000, guid: 47ab323efb029404aa48c18c795ec20a, type: 2}
+  - {fileID: 11400000, guid: 908c8a0fe53e83149985c6b03237be14, type: 2}

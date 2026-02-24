@@ -1,21 +1,73 @@
+// ============================================================================
+// CardDetailPopupController.cs — Per-card themed detail popup
+// ============================================================================
+//
+// INSPECTOR WIRING NOTES
+// ──────────────────────
+// 1. popupPanelImage   → Image component on the PopupPanel background.
+// 2. upgradeButton     → The Upgrade Button reference.
+//    upgradeButtonImage → Image component on the same Upgrade Button (its graphic).
+// 3. textTitle         → TMP_Text in Row_Title (card name).
+// 4. valueTitleLabel   → TMP_Text for the constant "Value" label.
+//    valueBodyText     → TMP_Text for the per-card value body (Value_Text).
+// 5. descTitleLabel    → TMP_Text for the constant "Description" label.
+//    descBodyText      → TMP_Text for the per-card description body (Description_Text).
+// 6. fillSegments[0..7]→ 8 × Image in Row_Bar fill slots, assigned left→right.
+//    (Image Type should be Simple, not Filled. Segments are toggled via SetActive.)
+// 7. themeDatabase     → Assign the CardPopupThemeDatabaseSO asset.
+// 8. Legacy fields (cardIcon, textCardType, progressFill, textProgress) are kept
+//    for backward compatibility and will still update when assigned.
+// ============================================================================
+
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Collections.Generic;
 
 public class CardDetailPopupController : MonoBehaviour
 {
     public static CardDetailPopupController Instance;
 
+    // ── Root ─────────────────────────────────────────────────────────────
     [Header("Root")]
     [SerializeField] private GameObject popupRoot;
 
-    [Header("UI References")]
-    [SerializeField] private Image cardIcon;
+    // ── Theme Database ───────────────────────────────────────────────────
+    [Header("Theme Database")]
+    [Tooltip("Assign the CardPopupThemeDatabaseSO asset that maps CardType → theme.")]
+    [SerializeField] private CardPopupThemeDatabaseSO themeDatabase;
+
+    // ── Themed Visuals ───────────────────────────────────────────────────
+    [Header("Themed Panel & Button")]
+    [Tooltip("Image on the PopupPanel background — sprite swapped per card.")]
+    [SerializeField] private Image popupPanelImage;
+    [Tooltip("Image on the Upgrade Button — sprite swapped per card.")]
+    [SerializeField] private Image upgradeButtonImage;
+
+    // ── Text References ──────────────────────────────────────────────────
+    [Header("Text — Title Row")]
     [SerializeField] private TextMeshProUGUI textTitle;
+
+    [Header("Text — Value Row")]
+    [Tooltip("Constant label 'Value' (set automatically).")]
+    [SerializeField] private TextMeshProUGUI valueTitleLabel;
+    [Tooltip("Per-card value body text.")]
+    [SerializeField] private TextMeshProUGUI valueBodyText;
+
+    [Header("Text — Description Row")]
+    [Tooltip("Constant label 'Description' (set automatically).")]
+    [SerializeField] private TextMeshProUGUI descTitleLabel;
+    [Tooltip("Per-card description body text.")]
+    [SerializeField] private TextMeshProUGUI descBodyText;
+
+    // ── Legacy UI References (kept for backward compat) ──────────────────
+    [Header("Legacy UI References")]
+    [SerializeField] private Image cardIcon;
     [SerializeField] private TextMeshProUGUI textCardType;
     [SerializeField] private TextMeshProUGUI textValue;
     [SerializeField] private TextMeshProUGUI textDescription;
 
+    // ── Buttons ──────────────────────────────────────────────────────────
     [Header("Buttons")]
     [SerializeField] private Button upgradeButton;
     [SerializeField] private Button closeButton;
@@ -24,17 +76,29 @@ public class CardDetailPopupController : MonoBehaviour
     [Header("Upgrade Button Text")]
     [SerializeField] private TextMeshProUGUI upgradeButtonText;
 
+    // ── Progress Bar (8 segments) ────────────────────────────────────────
     [Header("Progress Bar")]
-    [Tooltip("Fill Image for copy progress (must be Image Type = Filled)")]
+    [Tooltip("Fill Image for copy progress (legacy fillAmount bar — optional if using segments)")]
     [SerializeField] private Image progressFill;
-    [Tooltip("Optional: Dedicated text for progress (e.g., '2/3'). If null, uses textValue.")]
+    [Tooltip("8 segment fill images (one per segment, toggled on/off). Assign in order 0→7.\nImage Type should be Simple — segments are toggled via SetActive.")]
+    [SerializeField] private Image[] fillSegments;
+    [Tooltip("Optional: Dedicated text for progress (e.g., '3/8'). If null, uses textValue.")]
     [SerializeField] private TextMeshProUGUI textProgress;
 
+    // ── Runtime ──────────────────────────────────────────────────────────
     private CardDefinition currentCard;
+    private Dictionary<CardType, CardPopupThemeSO> _themeCache;
+
+    // =====================================================================
+    // Unity Lifecycle
+    // =====================================================================
 
     private void Awake()
     {
         Instance = this;
+
+        // Build O(1) theme lookup from database
+        BuildThemeCache();
 
         // Wire button listeners
         if (upgradeButton != null)
@@ -58,6 +122,10 @@ public class CardDetailPopupController : MonoBehaviour
             popupRoot.SetActive(false);
         }
     }
+
+    // =====================================================================
+    // Public API (unchanged signature — all call sites stay the same)
+    // =====================================================================
 
     /// <summary>
     /// Opens the popup and displays the given card's details.
@@ -84,6 +152,8 @@ public class CardDetailPopupController : MonoBehaviour
             gameObject.SetActive(true);
         }
 
+        // Apply per-card theme visuals, then refresh data-driven UI
+        ApplyTheme(def);
         RefreshUI();
     }
 
@@ -107,21 +177,98 @@ public class CardDetailPopupController : MonoBehaviour
     }
 
     /// <summary>
+    /// Returns true if the popup is currently open.
+    /// </summary>
+    public bool IsOpen
+    {
+        get
+        {
+            if (popupRoot != null)
+                return popupRoot.activeSelf;
+            return gameObject.activeSelf;
+        }
+    }
+
+    // =====================================================================
+    // Theme Application
+    // =====================================================================
+
+    /// <summary>
+    /// Applies per-card themed visuals (sprites + texts) from the theme database.
+    /// If no theme is found for the card, a warning is logged and current visuals are kept.
+    /// </summary>
+    private void ApplyTheme(CardDefinition def)
+    {
+        if (_themeCache == null || !_themeCache.TryGetValue(def.type, out CardPopupThemeSO theme))
+        {
+            Debug.LogWarning($"[CardDetailPopup] No theme found for {def.type}. Keeping current visuals.");
+            // Still set title from def as a fallback
+            if (textTitle != null)
+                textTitle.text = def.displayName;
+            return;
+        }
+
+        // 1) PopupPanel background sprite
+        if (popupPanelImage != null && theme.popupPanelSprite != null)
+        {
+            popupPanelImage.sprite = theme.popupPanelSprite;
+        }
+
+        // 2) Upgrade button sprite
+        if (upgradeButtonImage != null && theme.upgradeButtonSprite != null)
+        {
+            upgradeButtonImage.sprite = theme.upgradeButtonSprite;
+        }
+
+        // 3) Title — use override if provided, else def.displayName
+        if (textTitle != null)
+        {
+            textTitle.text = !string.IsNullOrEmpty(theme.displayNameOverride)
+                ? theme.displayNameOverride
+                : def.displayName;
+        }
+
+        // 4) Value row — constant label + per-card body
+        if (valueTitleLabel != null)
+        {
+            valueTitleLabel.text = "Value";
+        }
+        if (valueBodyText != null)
+        {
+            valueBodyText.text = theme.valueText;
+        }
+
+        // 5) Description row — constant label + per-card body
+        if (descTitleLabel != null)
+        {
+            descTitleLabel.text = "Description";
+        }
+        if (descBodyText != null)
+        {
+            descBodyText.text = theme.descriptionText;
+        }
+    }
+
+    // =====================================================================
+    // UI Refresh (data-driven: segments, costs, button state)
+    // =====================================================================
+
+    /// <summary>
     /// Refreshes the UI to reflect the current card's state.
     /// </summary>
     private void RefreshUI()
     {
         if (currentCard == null) return;
 
-        // Get progress values from helpers
+        // Get progress values from helpers (8-segment model)
         float progress01 = currentCard.GetUpgradeProgress01();
         string progressText = currentCard.GetUpgradeProgressText();
-        int need = currentCard.GetCopiesRequiredForNextLevel();
+        int filledSegmentCount = currentCard.GetFilledSegments();
 
         // Debug log
-        Debug.Log($"[CardUI] {currentCard.type} L{currentCard.currentLevel} copiesOwned={currentCard.copiesOwned} need={need} progress={progress01:F2} text={progressText}");
+        Debug.Log($"[CardUI] {currentCard.type} L{currentCard.currentLevel} segments={currentCard.copiesOwned} filled={filledSegmentCount} text={progressText}");
 
-        // Icon
+        // Icon (legacy — still works when assigned)
         if (cardIcon != null)
         {
             if (currentCard.icon != null)
@@ -131,39 +278,28 @@ public class CardDetailPopupController : MonoBehaviour
             }
             else
             {
-                cardIcon.color = new Color(1f, 1f, 1f, 0.3f); // Placeholder grey
+                cardIcon.color = new Color(1f, 1f, 1f, 0.3f);
             }
         }
 
-        // Title (displayName)
-        if (textTitle != null)
-        {
-            textTitle.text = currentCard.displayName;
-        }
-
-        // Card Type
+        // Card Type (legacy field)
         if (textCardType != null)
         {
             textCardType.text = $"{currentCard.type} - {currentCard.rarity}";
         }
 
-        // Value text (upgrade info)
+        // Legacy value text (upgrade info — no MAX state)
         if (textValue != null)
         {
             int level = currentCard.currentLevel;
             double cost = currentCard.GetUpgradeCost();
-
-            if (currentCard.IsMaxLevel)
-            {
-                textValue.text = $"Level {level} (MAX)\nCopies: {currentCard.copiesOwned}";
-            }
-            else
-            {
-                textValue.text = $"Level {level} → {level + 1}\nCost: {FormatNumber(cost)}\nCopies: {progressText}";
-            }
+            textValue.text = $"Level {level} → {level + 1}\nCost: {FormatNumber(cost)}\nSegments: {progressText}";
         }
 
-        // Progress bar fill
+        // 8-segment progress bar
+        UpdateSegments(filledSegmentCount);
+
+        // Legacy fill bar (optional fallback)
         if (progressFill != null)
         {
             progressFill.fillAmount = progress01;
@@ -175,7 +311,7 @@ public class CardDetailPopupController : MonoBehaviour
             textProgress.text = progressText;
         }
 
-        // Description (placeholder or rarity info)
+        // Legacy description text
         if (textDescription != null)
         {
             textDescription.text = GetCardDescription(currentCard);
@@ -185,36 +321,61 @@ public class CardDetailPopupController : MonoBehaviour
         UpdateUpgradeButton();
     }
 
+    // =====================================================================
+    // Segment Bar
+    // =====================================================================
+
+    /// <summary>
+    /// Toggles the 8 fill-segment images on/off based on the card's current segment count.
+    /// Bar_BG segments are always visible (they are siblings, not toggled here).
+    /// Bar_Fill segment i is ON when i &lt; segmentsFilled, OFF otherwise.
+    /// Image Type for these should be Simple (not Filled) — toggled via SetActive.
+    /// </summary>
+    private void UpdateSegments(int segmentsFilled)
+    {
+        if (fillSegments == null || fillSegments.Length == 0) return;
+
+        // Clamp to 0..8 for safety (overflow = show full bar)
+        int clamped = Mathf.Clamp(segmentsFilled, 0, fillSegments.Length);
+
+        for (int i = 0; i < fillSegments.Length; i++)
+        {
+            if (fillSegments[i] != null)
+                fillSegments[i].gameObject.SetActive(i < clamped);
+        }
+    }
+
+    // =====================================================================
+    // Upgrade Button
+    // =====================================================================
+
     /// <summary>
     /// Updates the upgrade button's interactable state and text.
+    /// 8-segment model: can upgrade when segments >= 8 AND enough money.
+    /// Never shows "MAX LEVEL" — levels are infinite.
     /// </summary>
     private void UpdateUpgradeButton()
     {
         if (upgradeButton == null || currentCard == null) return;
 
-        int copies = currentCard.copiesOwned;
-        int copiesNeeded = currentCard.GetCopiesRequiredForNextLevel();
+        int segments = currentCard.copiesOwned;
+        int segmentsNeeded = CardDropTuning.SegmentsPerUpgrade;
         double cost = currentCard.GetUpgradeCost();
         double money = CurrencyManager.Instance != null ? CurrencyManager.Instance.money : 0;
 
-        bool isMaxLevel = currentCard.IsMaxLevel;
-        bool hasEnoughCopies = copies >= copiesNeeded;
+        bool hasEnoughSegments = segments >= segmentsNeeded;
         bool hasEnoughMoney = money >= cost;
-
-        bool canUpgrade = !isMaxLevel && hasEnoughCopies && hasEnoughMoney;
+        bool canUpgrade = hasEnoughSegments && hasEnoughMoney;
 
         upgradeButton.interactable = canUpgrade;
 
-        // Update button text
+        // Update button text (no MAX state — infinite levels)
         if (upgradeButtonText != null)
         {
-            if (isMaxLevel)
+            if (!hasEnoughSegments)
             {
-                upgradeButtonText.text = "MAX LEVEL";
-            }
-            else if (!hasEnoughCopies)
-            {
-                upgradeButtonText.text = $"Need {copiesNeeded - copies} more copies";
+                int missing = segmentsNeeded - (segments % segmentsNeeded);
+                upgradeButtonText.text = $"Need {missing} more segments";
             }
             else if (!hasEnoughMoney)
             {
@@ -226,6 +387,10 @@ public class CardDetailPopupController : MonoBehaviour
             }
         }
     }
+
+    // =====================================================================
+    // Upgrade Click Handler (unchanged behavior)
+    // =====================================================================
 
     /// <summary>
     /// Called when the upgrade button is clicked.
@@ -285,8 +450,48 @@ public class CardDetailPopupController : MonoBehaviour
         }
     }
 
+    // =====================================================================
+    // Theme Cache
+    // =====================================================================
+
+    /// <summary>
+    /// Builds a Dictionary&lt;CardType, CardPopupThemeSO&gt; from the assigned database
+    /// for O(1) lookups during Show().
+    /// </summary>
+    private void BuildThemeCache()
+    {
+        _themeCache = new Dictionary<CardType, CardPopupThemeSO>();
+
+        if (themeDatabase == null)
+        {
+            Debug.LogWarning("[CardDetailPopup] No themeDatabase assigned. Themed visuals will be skipped.");
+            return;
+        }
+
+        if (themeDatabase.themes == null) return;
+
+        foreach (var theme in themeDatabase.themes)
+        {
+            if (theme == null) continue;
+
+            if (!_themeCache.ContainsKey(theme.type))
+            {
+                _themeCache.Add(theme.type, theme);
+            }
+        }
+
+        Debug.Log($"[CardDetailPopup] Theme cache built with {_themeCache.Count} entries.");
+    }
+
+    // =====================================================================
+    // Helpers (legacy — kept for backward compat)
+    // =====================================================================
+
     /// <summary>
     /// Returns a description for the card based on its type.
+    /// NOTE: When a CardPopupThemeSO exists for the card, descBodyText is
+    /// populated from the theme instead. This method is the legacy fallback
+    /// used by the old textDescription field.
     /// </summary>
     private string GetCardDescription(CardDefinition card)
     {
@@ -324,18 +529,5 @@ public class CardDetailPopupController : MonoBehaviour
         if (value >= 1_000)
             return $"{value / 1_000:F1}K";
         return value.ToString("F0");
-    }
-
-    /// <summary>
-    /// Returns true if the popup is currently open.
-    /// </summary>
-    public bool IsOpen
-    {
-        get
-        {
-            if (popupRoot != null)
-                return popupRoot.activeSelf;
-            return gameObject.activeSelf;
-        }
     }
 }

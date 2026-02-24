@@ -13,6 +13,9 @@ public class PanelManager : MonoBehaviour
         HideAllPanels();
         if (clickerRoot != null)
             clickerRoot.SetActive(true);
+
+        // Ensure suppression is OFF on scene start (Clicker is the default panel)
+        UIFlowState.IsContentPanelOpen = false;
     }
 
     public void OnClick_Clicker()
@@ -20,6 +23,9 @@ public class PanelManager : MonoBehaviour
         HideAllPanels();
         if (clickerRoot != null)
             clickerRoot.SetActive(true);
+
+        UIFlowState.IsContentPanelOpen = false;
+        Debug.Log($"[PanelManager] Switched to Clicker — suppression OFF");
     }
 
     public void OnClick_ShopCards()
@@ -27,6 +33,9 @@ public class PanelManager : MonoBehaviour
         HideAllPanels();
         if (panelShopCards != null)
             panelShopCards.SetActive(true);
+
+        UIFlowState.IsContentPanelOpen = true;
+        Debug.Log($"[PanelManager] Switched to ShopCards — suppression ON");
     }
 
     public void OnClick_Bank()
@@ -34,6 +43,9 @@ public class PanelManager : MonoBehaviour
         HideAllPanels();
         if (panelBank != null)
             panelBank.SetActive(true);
+
+        UIFlowState.IsContentPanelOpen = true;
+        Debug.Log($"[PanelManager] Switched to Bank — suppression ON");
     }
 
     public void OnClick_TimeWarp()
@@ -41,6 +53,9 @@ public class PanelManager : MonoBehaviour
         HideAllPanels();
         if (panelTimeWarp != null)
             panelTimeWarp.SetActive(true);
+
+        UIFlowState.IsContentPanelOpen = true;
+        Debug.Log($"[PanelManager] Switched to TimeWarp — suppression ON");
     }
 
     public void OnClick_Ranking()
@@ -48,6 +63,9 @@ public class PanelManager : MonoBehaviour
         HideAllPanels();
         if (panelRanking != null)
             panelRanking.SetActive(true);
+
+        UIFlowState.IsContentPanelOpen = true;
+        Debug.Log($"[PanelManager] Switched to Ranking — suppression ON");
     }
 
     public void OnClick_CloseShopCards()

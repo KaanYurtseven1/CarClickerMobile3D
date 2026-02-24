@@ -1,11 +1,15 @@
 using UnityEngine;
 using UnityEngine.UI;
 using DG.Tweening;
+using System;
 
 /// <summary>
 /// Shows a brief radar-snapshot popup when the player misses a radar.
 /// Captures one frame from SnapshotCamera into the RenderTexture,
 /// displays the popup with fade+zoom animation, then auto-closes.
+///
+/// Fires OnRadarPopupClosed when the popup finishes (animation complete or force-closed).
+/// PoliceCatchTrigger listens to this to defer Police Chase start until after the popup.
 ///
 /// Inspector wiring for chestShown:
 ///   Drag the "ChestShown" GameObject (child of Canvas) into the chestShown field.
@@ -15,10 +19,17 @@ public class RadarPopupController : MonoBehaviour
 {
     public static RadarPopupController Instance;
 
+    /// <summary>
+    /// Fired when a radar popup finishes closing (animation complete or force-closed).
+    /// PoliceCatchTrigger uses this to know when it is safe to start a deferred Police Chase.
+    /// </summary>
+    public static event Action OnRadarPopupClosed;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
     {
         Instance = null;
+        OnRadarPopupClosed = null;
     }
 
     [Header("UI")]
@@ -184,6 +195,9 @@ public class RadarPopupController : MonoBehaviour
             RestoreChestShown();
             IsPopupOpen = false;
             _popupSequence = null;
+
+            // Notify subscribers that the radar popup has fully closed
+            OnRadarPopupClosed?.Invoke();
         });
 
         _popupSequence.SetUpdate(true); // unscaled time so pauses don't break it
@@ -205,7 +219,13 @@ public class RadarPopupController : MonoBehaviour
         }
 
         RestoreChestShown();
+
+        bool wasOpen = IsPopupOpen;
         IsPopupOpen = false;
+
+        // Fire event if we were actually open (avoid spurious calls)
+        if (wasOpen)
+            OnRadarPopupClosed?.Invoke();
     }
 
     // ==================== INTERNAL ====================
@@ -256,7 +276,7 @@ public class RadarPopupController : MonoBehaviour
         Transform[] poses = (side == RadarSide.Left) ? leftCameraPoses : rightCameraPoses;
         if (poses != null && poses.Length > 0)
         {
-            Transform pose = poses[Random.Range(0, poses.Length)];
+            Transform pose = poses[UnityEngine.Random.Range(0, poses.Length)];
             if (pose != null)
             {
                 snapshotCamera.transform.position = pose.position;
@@ -267,9 +287,9 @@ public class RadarPopupController : MonoBehaviour
 
         // Apply micro-jitter for variety
         snapshotCamera.transform.position += new Vector3(
-            Random.Range(-jitterX, jitterX), 0f, 0f);
+            UnityEngine.Random.Range(-jitterX, jitterX), 0f, 0f);
         snapshotCamera.transform.rotation *= Quaternion.Euler(
-            0f, Random.Range(-jitterYaw, jitterYaw), 0f);
+            0f, UnityEngine.Random.Range(-jitterYaw, jitterYaw), 0f);
 
         // Single-frame manual render (camera stays disabled in the render loop)
         snapshotCamera.Render();

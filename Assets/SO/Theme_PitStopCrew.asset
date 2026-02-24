@@ -16,5 +16,8 @@ MonoBehaviour:
   popupPanelSprite: {fileID: 21300000, guid: 2214c536683f1854187a13028f5c39dc, type: 3}
   upgradeButtonSprite: {fileID: 21300000, guid: 371bd78b7bce9b14891619a37eedc55c, type: 3}
   displayNameOverride: PIT STOP CREW
-  valueText: 
-  descriptionText: 
+  valueText: 'Offline earn: {EFFICIENCY}% of MPS (max {CAP}h)\n'
+  descriptionText: 'Earn money while you''re away. Higher level\n
+
+    = more efficiency
+    and longer time cap.'

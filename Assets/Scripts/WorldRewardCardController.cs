@@ -46,19 +46,46 @@ public class WorldRewardCardController : MonoBehaviour
     [Header("Hide Animation")]
     [SerializeField] private float hideDuration = 0.22f;
 
-    [Header("Icon Size Normalization")]
-    [Tooltip("Target world-space height for the icon sprite at localScale=1 on the iconRenderer child. \n"
-           + "All reward icons are scaled so their SpriteRenderer renders at exactly this world height, \n"
-           + "making Money / Nitro / Card reward cards identical in size. \n"
-           + "Set to the natural bounds.size.y of your Money/Nitro icon sprites (check Debug logs). \n"
-           + "Set to 0 to disable normalization (legacy behaviour).")]
-    [SerializeField] private float normalizedIconWorldHeight = 1.0f;
+    [Header("Reveal Rotation (D: additive 180° flip)")]
+    [Tooltip("Enable an additive Y-axis rotation during rise+slide")]
+    [SerializeField] private bool enableRevealRotation = true;
+    [Tooltip("Total rotation degrees during reveal (applied to Y axis)")]
+    [SerializeField] private float revealRotationDegrees = 180f;
+
+    [Header("Unified Reward Size")]
+    [Tooltip("Target world-space width for ALL reward types (money, nitro, card art).\n"
+           + "The active renderer child is auto-scaled so its world width matches this value.\n"
+           + "If > 0: used directly. If == 0: auto-detected from the icon renderer each reveal\n"
+           + "(icon mode becomes a no-op; cardBG mode falls back to this field — set it!).\n"
+           + "Calibration: play a money reveal, read the log 'widthBefore=X', set this to X.")]
+    [SerializeField] private float referenceWorldWidth = 1.0f;
+
+    [Tooltip("Clamp the computed scale factor to a safe range.")]
+    [SerializeField] private float fitMinScale = 0.05f;
+    [SerializeField] private float fitMaxScale = 5.0f;
 
     //  RUNTIME 
     private Camera _cam;
     private Transform _mouthAnchor;
     private Transform _parkAnchor;
     private bool _isBillboard;
+
+    // D: Additive Y rotation offset (animated, applied in LateUpdate billboard)
+    private float _revealYOffset;
+
+    // Cached default localScales (captured in Awake, restored each reveal)
+    private Vector3 _iconDefaultLocalScale = Vector3.one;
+    private Vector3 _cardBGDefaultLocalScale = Vector3.one;
+
+    // 
+    //  LIFECYCLE
+    // 
+
+    private void Awake()
+    {
+        if (iconRenderer != null)   _iconDefaultLocalScale  = iconRenderer.transform.localScale;
+        if (cardBGRenderer != null) _cardBGDefaultLocalScale = cardBGRenderer.transform.localScale;
+    }
 
     // 
     //  PUBLIC API
@@ -93,6 +120,9 @@ public class WorldRewardCardController : MonoBehaviour
         transform.DOKill();
         DOTween.Kill(this);
 
+        // Reset child transforms to cached prefab defaults (prevents scale accumulation)
+        ResetChildScales();
+
         //  Set visuals  ─────────────────────────────────────────────────────
         bool useCardBGMode = (cardBGOverrideSprite != null);
 
@@ -113,12 +143,12 @@ public class WorldRewardCardController : MonoBehaviour
             {
                 iconRenderer.gameObject.SetActive(true);
                 if (icon != null)
-                {
                     iconRenderer.sprite = icon;
-                    NormalizeIconScale(icon);
-                }
             }
         }
+
+        // Fit active renderer to unified reference width
+        FitActiveRenderer(useCardBGMode);
 
         if (overlayText != null) overlayText.text = overlayLabel ?? "";
 
@@ -145,6 +175,7 @@ public class WorldRewardCardController : MonoBehaviour
         SetAlpha(riseStartAlpha);
         gameObject.SetActive(true);
         _isBillboard = true;
+        _revealYOffset = enableRevealRotation ? revealRotationDegrees : 0f;
 
         Debug.Log($"[WorldCard] ShowWorldCard start={startPos} risen={risenPos} park={parkPos}");
 
@@ -158,6 +189,15 @@ public class WorldRewardCardController : MonoBehaviour
         seq.Join(transform.DOScale(Vector3.one * riseEndScale, riseDuration).SetEase(Ease.OutCubic));
         seq.Join(transform.DOLocalRotate(Vector3.zero, riseDuration).SetEase(Ease.OutQuad));
         seq.Join(DOTween.To(GetAlpha, SetAlpha, 1f, riseDuration).SetEase(Ease.OutQuad));
+
+        // D: Additive 180° Y rotation during rise + slide (applied via billboard offset)
+        if (enableRevealRotation)
+        {
+            float totalDur = riseDuration + 0.06f + slideDuration;
+            seq.Join(DOTween.To(() => _revealYOffset, v => _revealYOffset = v, 0f, totalDur)
+                .SetEase(Ease.InOutQuad));
+        }
+
         seq.AppendCallback(() => Debug.Log($"[WorldCard] AFTER RISE  rootLocalScale={transform.localScale}"));
 
         // tiny beat
@@ -171,6 +211,7 @@ public class WorldRewardCardController : MonoBehaviour
         {
             // Force exact park scale (guard against tween floating-point drift)
             transform.localScale = Vector3.one * parkScale;
+            _revealYOffset = 0f; // Ensure rotation is zeroed out
             Debug.Log($"[WorldCard] PARK  rootLocalScale={transform.localScale}  pos={parkPos}");
             onParked?.Invoke();
         });
@@ -203,47 +244,77 @@ public class WorldRewardCardController : MonoBehaviour
     }
 
     // 
-    //  ICON SIZE NORMALIZATION
+    //  UNIFIED SIZE NORMALIZATION
     // 
 
     /// <summary>
-    /// Adjusts <see cref="iconRenderer"/>'s local scale so the sprite always renders
-    /// at <see cref="normalizedIconWorldHeight"/> world units tall, regardless of
-    /// sprite texture dimensions or Pixels-Per-Unit setting.
-    ///
-    /// This is the minimal fix for the size divergence between Money/Nitro icon sprites
-    /// (small, purpose-built) and the Card artwork sprite (large, card-sized artwork):
-    /// both end up at the same on-screen height once the root transform applies parkScale.
+    /// Restores both child renderers to their prefab-default localScales.
+    /// Called at the start of every ShowWorldCard to prevent scale accumulation
+    /// across successive reveals.
     /// </summary>
-    private void NormalizeIconScale(Sprite icon)
+    private void ResetChildScales()
     {
-        if (iconRenderer == null || icon == null) return;
+        if (iconRenderer != null)   iconRenderer.transform.localScale  = _iconDefaultLocalScale;
+        if (cardBGRenderer != null) cardBGRenderer.transform.localScale = _cardBGDefaultLocalScale;
+    }
 
-        if (normalizedIconWorldHeight <= 0f)
+    /// <summary>
+    /// Scales the ACTIVE child renderer (iconRenderer in icon mode, cardBGRenderer
+    /// in card-art mode) so its world-width matches a single reference width.
+    /// Reference = iconRenderer’s current world-width (preferred) or the
+    /// serialized <see cref="referenceWorldWidth"/> fallback.
+    /// </summary>
+    private void FitActiveRenderer(bool useCardBGMode)
+    {
+        // 1. Compute reference width
+        float refWidth = ComputeReferenceWidth();
+        if (refWidth < 1e-5f)
         {
-            // Normalization disabled — reset to prefab default so legacy behaviour is preserved.
-            iconRenderer.transform.localScale = Vector3.one;
-            Debug.Log($"[WorldCard] NormalizeIcon DISABLED (normalizedIconWorldHeight=0)  "
-                    + $"sprite='{icon.name}' bounds.y={icon.bounds.size.y:F4}  using scale=1");
+            Debug.LogWarning("[WorldCard] FitActiveRenderer: referenceWidth ≈ 0 — skipping.");
             return;
         }
 
-        float spriteWorldHeight = icon.bounds.size.y;   // world units at localScale=1
-        if (spriteWorldHeight < 1e-5f)
+        // 2. Determine active renderer
+        SpriteRenderer active = useCardBGMode ? cardBGRenderer : iconRenderer;
+        if (active == null || active.sprite == null) return;
+
+        // 3. Current world width = sprite bounds.x * lossyScale.x (includes parent + child scale)
+        float activeWidth = active.sprite.bounds.size.x * active.transform.lossyScale.x;
+        if (activeWidth < 1e-5f) return;
+
+        // 4. Scale factor applied to child localScale only (root anim scale untouched)
+        float scaleFactor = refWidth / activeWidth;
+        scaleFactor = Mathf.Clamp(scaleFactor, fitMinScale, fitMaxScale);
+
+        Vector3 prev = active.transform.localScale;
+        active.transform.localScale = prev * scaleFactor;
+
+        float finalWidth = active.sprite.bounds.size.x * active.transform.lossyScale.x;
+
+        Debug.Log($"[WorldCard] FitActiveRenderer  refWidth={refWidth:F4}  "
+                + $"active='{active.name}' sprite='{active.sprite.name}'  "
+                + $"widthBefore={activeWidth:F4}  scaleFactor={scaleFactor:F4}  "
+                + $"widthAfter={finalWidth:F4}  childLocalScale={active.transform.localScale}");
+    }
+
+    /// <summary>
+    /// Returns the reference world-width that all rewards should match.
+    /// Prefers the iconRenderer’s live value (auto-detect) because money/nitro
+    /// icons define “the standard”.  Falls back to the serialized field.
+    /// </summary>
+    private float ComputeReferenceWidth()
+    {
+        // Prefer iconRenderer (the "standard" — money / nitro icon size)
+        if (iconRenderer != null && iconRenderer.sprite != null)
         {
-            Debug.LogWarning($"[WorldCard] NormalizeIcon: sprite '{icon.name}' has near-zero bounds.y!  Skipping.");
-            iconRenderer.transform.localScale = Vector3.one;
-            return;
+            float w = iconRenderer.sprite.bounds.size.x * iconRenderer.transform.lossyScale.x;
+            if (w > 1e-5f) return w;
         }
 
-        float corrective = normalizedIconWorldHeight / spriteWorldHeight;
-        iconRenderer.transform.localScale = Vector3.one * corrective;
-
-        Debug.Log($"[WorldCard] NormalizeIcon  sprite='{icon.name}' "
-                + $"bounds.y={spriteWorldHeight:F4}  "
-                + $"target={normalizedIconWorldHeight:F4}  "
-                + $"corrective={corrective:F4}  "
-                + $"iconLocalScale={iconRenderer.transform.localScale}");
+        // Serialized fallback (required when iconRenderer has no default sprite,
+        // e.g. during card-art reveals on a fresh prefab instance).
+        // Set this to the money/nitro icon’s world width for consistency.
+        return referenceWorldWidth;
     }
 
     // 
@@ -254,7 +325,11 @@ public class WorldRewardCardController : MonoBehaviour
     {
         if (!_isBillboard || _cam == null) return;
         Vector3 fwd = _cam.transform.forward;
-        transform.rotation = Quaternion.LookRotation(fwd, Vector3.up);
+        Quaternion billboard = Quaternion.LookRotation(fwd, Vector3.up);
+        // D: Apply additive Y rotation offset from reveal animation
+        if (_revealYOffset != 0f)
+            billboard *= Quaternion.Euler(0f, _revealYOffset, 0f);
+        transform.rotation = billboard;
     }
 
     // 

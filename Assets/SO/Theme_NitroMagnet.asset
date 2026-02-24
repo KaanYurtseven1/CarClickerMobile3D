@@ -16,5 +16,10 @@ MonoBehaviour:
   popupPanelSprite: {fileID: 21300000, guid: 370d63f846674ca4086b8df2d43a1f6e, type: 3}
   upgradeButtonSprite: {fileID: 21300000, guid: 37c2d3a7d8d241647a9eca87d06c2d9f, type: 3}
   displayNameOverride: NITRO MAGNET
-  valueText: 
-  descriptionText: 
+  valueText: 'Tap {TAPS}x to arm | Auto-pull {COINS} nitro coins\n
+
+'
+  descriptionText: 'Tap to charge. When armed, nearby nitro coins\n
+
+    are pulled
+    toward your car automatically.'

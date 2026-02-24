@@ -16,5 +16,11 @@ MonoBehaviour:
   popupPanelSprite: {fileID: 21300000, guid: 1391d609f8ff4f840b0097137fa3708c, type: 3}
   upgradeButtonSprite: {fileID: 21300000, guid: 08414e3b46ed3274f828167c8a78af16, type: 3}
   displayNameOverride: GARAGE MANAGER
-  valueText: 
-  descriptionText: 
+  valueText: 'MPS x{MULTIPLIER} for 60s | Cooldown: 120s\n
+
+    Spend {SPEND_SECS}s
+    worth of MPS to trigger'
+  descriptionText: 'Spend money to charge. When full, your MPS\n
+
+    gets a huge
+    boost for 60 seconds.'

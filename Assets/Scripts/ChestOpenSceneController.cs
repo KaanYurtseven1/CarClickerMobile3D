@@ -665,6 +665,9 @@ public class ChestOpenSceneController : MonoBehaviour
             rewardPackage.cardArtSprite = def.cardArtSprite != null ? def.cardArtSprite : def.icon;
             rewardPackage.cardRarity = def.rarity;
 
+            // C: Snapshot pre-reward copies for progress bar animation
+            rewardPackage.preRewardCopiesOwned = Mathf.Clamp(def.copiesOwned, 0, CardDropTuning.SegmentsPerUpgrade);
+
             // Dynamic segment multiplier based on selected card's level
             int multiplier = CardDropTuning.GetCardDropMultiplier(def.currentLevel);
             rewardPackage.cardCopies = multiplier;  // segments granted

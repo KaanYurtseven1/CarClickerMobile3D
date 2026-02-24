@@ -111,10 +111,29 @@ public class CardSlotUI : MonoBehaviour
         // PROGRESS BAR: segmented toggle
         UpdateSegments(filledSegments);
 
-        // ICON COLOR: unlocked white, locked slight grey
+        // ICON: swap sprite for locked/unlocked state
         if (iconImage != null)
         {
-            iconImage.color = unlocked ? unlockedColor : lockedColor;
+            if (unlocked)
+            {
+                // Show the normal coloured icon
+                if (card.icon != null)
+                    iconImage.sprite = card.icon;
+                iconImage.color = Color.white;
+            }
+            else if (card.lockedIcon != null)
+            {
+                // Show dedicated grayscale locked art — no tint needed
+                iconImage.sprite = card.lockedIcon;
+                iconImage.color = Color.white;
+            }
+            else
+            {
+                // Fallback: lockedIcon not assigned yet — keep icon + alpha tint
+                if (card.icon != null)
+                    iconImage.sprite = card.icon;
+                iconImage.color = lockedColor;
+            }
         }
     }
 

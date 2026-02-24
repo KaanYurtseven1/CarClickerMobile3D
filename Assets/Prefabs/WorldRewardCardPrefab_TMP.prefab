@@ -214,7 +214,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -0.3, y: -0.3}
+  m_AnchoredPosition: {x: -0.28, y: -0.28}
   m_SizeDelta: {x: 20, y: 5}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!23 &6986532999299146062
@@ -312,8 +312,8 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 2
-  m_fontSizeBase: 2
+  m_fontSize: 1.4
+  m_fontSizeBase: 1.4
   m_fontWeight: 400
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
@@ -407,7 +407,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f33e8c626aa92f846a46d109e205569d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WorldRewardCardController
-  cardBGRenderer: {fileID: 0}
+  cardBGRenderer: {fileID: 2333182696956328250}
   iconRenderer: {fileID: 1889038754272909867}
   overlayText: {fileID: 5299213265615523610}
   riseStartScale: 0.15
@@ -416,9 +416,11 @@ MonoBehaviour:
   riseStartTiltZ: 20
   riseStartAlpha: 0.3
   slideDuration: 0.35
-  parkScale: 1.5
+  parkScale: 2.1
   hideDuration: 0.22
-  normalizedIconWorldHeight: 1
+  referenceWorldWidth: 1
+  fitMinScale: 0.05
+  fitMaxScale: 5
 --- !u!210 &5697631716419045865
 SortingGroup:
   m_ObjectHideFlags: 0

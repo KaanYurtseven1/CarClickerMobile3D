@@ -16,5 +16,11 @@ MonoBehaviour:
   popupPanelSprite: {fileID: 21300000, guid: 007537661a7ef644ba03c2317b2f63e3, type: 3}
   upgradeButtonSprite: {fileID: 21300000, guid: 76e11ead4d0c1e541b12895f9f174cd0, type: 3}
   displayNameOverride: BOOST MODE
-  valueText: 
-  descriptionText: 
+  valueText: 'All income x{MULTIPLIER} for 10s\n
+
+    Charge: {MAX_CHARGE} nitro
+    | Cooldown: {COOLDOWN}s'
+  descriptionText: 'Collect nitro to fill the boost bar. When\n
+
+    full, all income
+    is massively multiplied.'

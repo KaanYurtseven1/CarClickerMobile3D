@@ -17,12 +17,15 @@
 // 7. themeDatabase     → Assign the CardPopupThemeDatabaseSO asset.
 // 8. Legacy fields (cardIcon, textCardType, progressFill, textProgress) are kept
 //    for backward compatibility and will still update when assigned.
+// 9. popupPanelTransform → RectTransform of the PopupPanel (scaled during animation).
+// 10. rootCanvasGroup   → CanvasGroup on the popupRoot (faded during animation).
 // ============================================================================
 
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections.Generic;
+using DG.Tweening;
 
 public class CardDetailPopupController : MonoBehaviour
 {
@@ -31,6 +34,15 @@ public class CardDetailPopupController : MonoBehaviour
     // ── Root ─────────────────────────────────────────────────────────────
     [Header("Root")]
     [SerializeField] private GameObject popupRoot;
+
+    // ── Animation ────────────────────────────────────────────────────────
+    [Header("Animation")]
+    [Tooltip("RectTransform of the PopupPanel — scaled during open/close animation.")]
+    [SerializeField] private RectTransform popupPanelTransform;
+    [Tooltip("CanvasGroup on the popupRoot — faded during open/close animation.")]
+    [SerializeField] private CanvasGroup rootCanvasGroup;
+    [SerializeField] private float openDuration = 0.35f;
+    [SerializeField] private float closeDuration = 0.2f;
 
     // ── Theme Database ───────────────────────────────────────────────────
     [Header("Theme Database")]
@@ -88,6 +100,8 @@ public class CardDetailPopupController : MonoBehaviour
     // ── Runtime ──────────────────────────────────────────────────────────
     private CardDefinition currentCard;
     private Dictionary<CardType, CardPopupThemeSO> _themeCache;
+    private bool isAnimating;
+    private Sequence currentSequence;
 
     // =====================================================================
     // Unity Lifecycle
@@ -138,6 +152,9 @@ public class CardDetailPopupController : MonoBehaviour
             return;
         }
 
+        // Guard against double-open or animation overlap
+        if (isAnimating || IsOpen) return;
+
         currentCard = def;
 
         Debug.Log($"[CardDetailPopup] Showing card: {def.displayName} (Type: {def.type})");
@@ -155,25 +172,21 @@ public class CardDetailPopupController : MonoBehaviour
         // Apply per-card theme visuals, then refresh data-driven UI
         ApplyTheme(def);
         RefreshUI();
+
+        // ── Open animation ──────────────────────────────────────────────
+        PlayOpenAnimation();
     }
 
     /// <summary>
-    /// Closes the popup.
+    /// Closes the popup with a fade-out + scale-down animation.
     /// </summary>
     public void Close()
     {
+        if (isAnimating || !IsOpen) return;
+
         Debug.Log("[CardDetailPopup] Closing popup.");
 
-        if (popupRoot != null)
-        {
-            popupRoot.SetActive(false);
-        }
-        else
-        {
-            gameObject.SetActive(false);
-        }
-
-        currentCard = null;
+        PlayCloseAnimation();
     }
 
     /// <summary>
@@ -187,6 +200,116 @@ public class CardDetailPopupController : MonoBehaviour
                 return popupRoot.activeSelf;
             return gameObject.activeSelf;
         }
+    }
+
+    // =====================================================================
+    // Animation Helpers
+    // =====================================================================
+
+    /// <summary>
+    /// Plays the open animation: fade in + scale up with overshoot.
+    /// </summary>
+    private void PlayOpenAnimation()
+    {
+        KillCurrentSequence();
+
+        // If references are missing, skip animation and just show instantly
+        if (rootCanvasGroup == null || popupPanelTransform == null)
+        {
+            return;
+        }
+
+        isAnimating = true;
+
+        // Prepare initial state
+        rootCanvasGroup.alpha = 0f;
+        popupPanelTransform.localScale = Vector3.one * 0.85f;
+        rootCanvasGroup.blocksRaycasts = false;
+
+        currentSequence = DOTween.Sequence();
+        currentSequence
+            .Join(rootCanvasGroup.DOFade(1f, openDuration * 0.7f).SetEase(Ease.OutCubic))
+            .Join(popupPanelTransform.DOScale(Vector3.one, openDuration).SetEase(Ease.OutBack, 1.1f))
+            .SetUpdate(true) // ignore timescale
+            .OnComplete(() =>
+            {
+                isAnimating = false;
+                if (rootCanvasGroup != null)
+                    rootCanvasGroup.blocksRaycasts = true;
+            })
+            .OnKill(() =>
+            {
+                // Ensure valid state even if killed mid-animation
+                isAnimating = false;
+            });
+    }
+
+    /// <summary>
+    /// Plays the close animation: fade out + scale down, then deactivates.
+    /// </summary>
+    private void PlayCloseAnimation()
+    {
+        KillCurrentSequence();
+
+        // If references are missing, close instantly (legacy behavior)
+        if (rootCanvasGroup == null || popupPanelTransform == null)
+        {
+            DeactivatePopup();
+            return;
+        }
+
+        isAnimating = true;
+        rootCanvasGroup.blocksRaycasts = false;
+
+        currentSequence = DOTween.Sequence();
+        currentSequence
+            .Join(rootCanvasGroup.DOFade(0f, closeDuration).SetEase(Ease.InCubic))
+            .Join(popupPanelTransform.DOScale(Vector3.one * 0.85f, closeDuration).SetEase(Ease.InCubic))
+            .SetUpdate(true) // ignore timescale
+            .OnComplete(() =>
+            {
+                DeactivatePopup();
+                // Reset scale so the next open starts clean
+                if (popupPanelTransform != null)
+                    popupPanelTransform.localScale = Vector3.one;
+                if (rootCanvasGroup != null)
+                    rootCanvasGroup.blocksRaycasts = false;
+                isAnimating = false;
+            })
+            .OnKill(() =>
+            {
+                isAnimating = false;
+            });
+    }
+
+    /// <summary>
+    /// Deactivates the popup root (or this gameObject as fallback) and clears currentCard.
+    /// </summary>
+    private void DeactivatePopup()
+    {
+        if (popupRoot != null)
+            popupRoot.SetActive(false);
+        else
+            gameObject.SetActive(false);
+
+        currentCard = null;
+    }
+
+    /// <summary>
+    /// Safely kills any running DOTween sequence to prevent leaks or double-plays.
+    /// </summary>
+    private void KillCurrentSequence()
+    {
+        if (currentSequence != null && currentSequence.IsActive())
+        {
+            currentSequence.Kill();
+            currentSequence = null;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        KillCurrentSequence();
     }
 
     // =====================================================================
@@ -228,24 +351,16 @@ public class CardDetailPopupController : MonoBehaviour
                 : def.displayName;
         }
 
-        // 4) Value row — constant label + per-card body
+        // 4) Value row — constant label (body text set dynamically in RefreshUI)
         if (valueTitleLabel != null)
         {
             valueTitleLabel.text = "Value";
         }
-        if (valueBodyText != null)
-        {
-            valueBodyText.text = theme.valueText;
-        }
 
-        // 5) Description row — constant label + per-card body
+        // 5) Description row — constant label (body text set dynamically in RefreshUI)
         if (descTitleLabel != null)
         {
             descTitleLabel.text = "Description";
-        }
-        if (descBodyText != null)
-        {
-            descBodyText.text = theme.descriptionText;
         }
     }
 
@@ -309,6 +424,16 @@ public class CardDetailPopupController : MonoBehaviour
         if (textProgress != null)
         {
             textProgress.text = progressText;
+        }
+
+        // Dynamic value & description body text (level-aware)
+        if (valueBodyText != null)
+        {
+            valueBodyText.text = WrapTwoLines(BuildValueText(currentCard));
+        }
+        if (descBodyText != null)
+        {
+            descBodyText.text = WrapTwoLines(BuildDescriptionText(currentCard));
         }
 
         // Legacy description text
@@ -481,6 +606,231 @@ public class CardDetailPopupController : MonoBehaviour
         }
 
         Debug.Log($"[CardDetailPopup] Theme cache built with {_themeCache.Count} entries.");
+    }
+
+    // =====================================================================
+    // Dynamic Text Generation (level-aware value & description)
+    // =====================================================================
+
+    // ── Scaling tables (must mirror the actual controller constants) ────
+    // TurboFinger: LevelMultipliers[0..6] — index = card level
+    private static readonly float[] TF_Multipliers = { 1f, 5f, 10f, 20f, 50f, 100f, 200f };
+
+    // NitroRain: RequiredCollects and RainDurations — index = card level
+    private static readonly int[]   NR_Collects  = { 0, 3, 4, 5, 6, 7, 8 };
+    private static readonly float[] NR_Durations = { 0f, 5f, 8f, 11f, 14f, 17f, 20f };
+
+    // PitStopCrew: EfficiencyByLevel (fraction) and CapHoursByLevel
+    private static readonly float[] PS_Efficiency = { 0f, 0.20f, 0.30f, 0.40f, 0.55f, 0.70f, 0.85f };
+    private static readonly float[] PS_CapHours   = { 0f, 2f, 3f, 4f, 6f, 8f, 12f };
+
+    // GarageManager: BonusMultipliers and SpendSecondsEquivalents
+    private static readonly float[] GM_Multipliers  = { 0f, 10f, 11f, 12f, 13f, 14f, 15f };
+    private static readonly float[] GM_SpendSeconds = { 0f, 30f, 28f, 26f, 24f, 22f, 20f };
+
+    // SmallInvestment: base 2%, +2% per level, cap 12%
+    private const float SI_Base = 2f;
+    private const float SI_Step = 2f;
+    private const float SI_Cap  = 12f;
+
+    // Momentum: scaling helpers
+    private const float MO_BaseWindow    = 0.80f;
+    private const float MO_WindowStep    = 0.20f;
+    private const float MO_BaseBonus     = 0.005f;
+    private const float MO_BonusStep     = 0.002f;
+    private const int   MO_BaseCap       = 30;
+    private const int   MO_CapStep       = 10;
+
+    // NitroMagnet: taps required and coins to collect (index = level - 1)
+    private static readonly int[] NM_Taps  = { 30, 40, 50, 55, 60, 70 };
+    private static readonly int[] NM_Coins = { 3, 4, 5, 7, 9, 12 };
+
+    /// <summary>
+    /// Builds a player-friendly VALUE string for the given card based on its
+    /// current level and the actual effect scaling rules.
+    /// </summary>
+    private string BuildValueText(CardDefinition def)
+    {
+        int lv = def.currentLevel;
+        if (lv <= 0) return "Unlock the card to see its effect.";
+
+        switch (def.type)
+        {
+            case CardType.TurboFinger:
+            {
+                int idx = Mathf.Clamp(lv, 0, TF_Multipliers.Length - 1);
+                float mult = TF_Multipliers[idx];
+                return $"Tap income x{mult:G} for 30s\nActivate: 50 taps/15s | CD: 120s";
+            }
+
+            case CardType.NitroRain:
+            {
+                int idx = Mathf.Clamp(lv, 0, NR_Collects.Length - 1);
+                int req = NR_Collects[idx];
+                float dur = NR_Durations[idx];
+                return $"Collect {req} nitro to start rain ({dur:G}s)\n30s delay before rain";
+            }
+
+            case CardType.PitStopCrew:
+            {
+                int idx = Mathf.Clamp(lv, 0, PS_Efficiency.Length - 1);
+                int eff = Mathf.RoundToInt(PS_Efficiency[idx] * 100f);
+                float cap = PS_CapHours[idx];
+                return $"Offline earn: {eff}% of MPS (max {cap:G}h)";
+            }
+
+            case CardType.GarageManager:
+            {
+                int idx = Mathf.Clamp(lv, 0, GM_Multipliers.Length - 1);
+                float mult = GM_Multipliers[idx];
+                float secs = GM_SpendSeconds[idx];
+                return $"MPS x{mult:G} for 60s | CD: 120s\nSpend {secs:G}s of MPS to trigger";
+            }
+
+            case CardType.BoostMode:
+            {
+                int clampLv = Mathf.Clamp(lv, 1, 6);
+                float mult = clampLv * 10f;
+                int maxCharge = 5 + clampLv * 5;
+                float cd = 30f + clampLv * 15f;
+                return $"All income x{mult:G} for 10s\nCharge: {maxCharge} nitro | CD: {cd:G}s";
+            }
+
+            case CardType.SmallInvestment:
+            {
+                float pct = Mathf.Clamp(SI_Base + (lv - 1) * SI_Step, 0f, SI_Cap);
+                return $"Refund {pct:G}% of all money & nitro spent";
+            }
+
+            case CardType.Momentum:
+            {
+                float win = MO_BaseWindow + (lv - 1) * MO_WindowStep;
+                float bonus = MO_BaseBonus + (lv - 1) * MO_BonusStep;
+                int cap = MO_BaseCap + (lv - 1) * MO_CapStep;
+                float maxMult = 1f + cap * bonus;
+                float pctPerTap = bonus * 100f;
+                return $"Up to x{maxMult:F2} tap income ({cap} stacks)\nReset: {win:F1}s | +{pctPerTap:G}%/tap";
+            }
+
+            case CardType.NitroMagnet:
+            {
+                int idx = Mathf.Clamp(lv - 1, 0, NM_Taps.Length - 1);
+                int taps = NM_Taps[idx];
+                int coins = NM_Coins[idx];
+                return $"Tap {taps}x to arm | Auto-pull {coins} nitro";
+            }
+
+            default:
+            {
+                // Fallback: try theme static text
+                if (_themeCache != null && _themeCache.TryGetValue(def.type, out var theme)
+                    && !string.IsNullOrEmpty(theme.valueText))
+                    return theme.valueText;
+                return $"Level {lv} active.";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds a short player-friendly DESCRIPTION for the given card type.
+    /// Mostly static per type but still goes through WrapTwoLines.
+    /// </summary>
+    private string BuildDescriptionText(CardDefinition def)
+    {
+        switch (def.type)
+        {
+            case CardType.TurboFinger:
+                return "Tap fast to trigger a massive tap income\nmultiplier. Higher level = bigger boost.";
+
+            case CardType.NitroRain:
+                return "Collect nitro coins to trigger a rain of\nbonus nitro. More level = longer rain.";
+
+            case CardType.PitStopCrew:
+                return "Earn money while you're away. Higher level\n= more efficiency and longer time cap.";
+
+            case CardType.GarageManager:
+                return "Spend money to charge. When full, your MPS\ngets a huge boost for 60 seconds.";
+
+            case CardType.BoostMode:
+                return "Collect nitro to fill the boost bar. When\nfull, all income is massively multiplied.";
+
+            case CardType.SmallInvestment:
+                return "Get a percentage of every purchase back.\nHigher level = bigger cashback.";
+
+            case CardType.Momentum:
+                return "Keep tapping without stopping to build combo\nstacks. More stacks = more tap income.";
+
+            case CardType.NitroMagnet:
+                return "Tap to charge the magnet. When armed, nearby\nnitro coins fly to your car automatically.";
+
+            default:
+            {
+                // Fallback: try theme static text
+                if (_themeCache != null && _themeCache.TryGetValue(def.type, out var theme)
+                    && !string.IsNullOrEmpty(theme.descriptionText))
+                    return theme.descriptionText;
+                return $"Rarity: {def.rarity}";
+            }
+        }
+    }
+
+    // =====================================================================
+    // Text Wrapping Utility
+    // =====================================================================
+
+    /// <summary>
+    /// Enforces the 2-line / 67-char-per-line rule for popup text fields.
+    /// Strategy: prefer splitting at last space before limit; hard-split if
+    /// no space; truncate with "..." if second line also overflows.
+    /// Already-split text (containing '\n') is respected if within limits.
+    /// </summary>
+    private static string WrapTwoLines(string s, int maxPerLine = 67)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+
+        // If the text already has a newline, honour it
+        int nlIndex = s.IndexOf('\n');
+        if (nlIndex >= 0)
+        {
+            string l1 = s.Substring(0, nlIndex);
+            string l2 = s.Substring(nlIndex + 1);
+
+            // Trim each line to max length
+            if (l1.Length > maxPerLine)
+                l1 = TrimLine(l1, maxPerLine);
+
+            // Drop any 3rd+ lines
+            int nl2 = l2.IndexOf('\n');
+            if (nl2 >= 0)
+                l2 = l2.Substring(0, nl2);
+
+            if (l2.Length > maxPerLine)
+                l2 = TrimLine(l2, maxPerLine);
+
+            return l2.Length > 0 ? l1 + "\n" + l2 : l1;
+        }
+
+        // Single-line text that fits — return as-is
+        if (s.Length <= maxPerLine) return s;
+
+        // Need to split into two lines
+        int splitAt = s.LastIndexOf(' ', maxPerLine - 1);
+        if (splitAt <= 0) splitAt = maxPerLine; // hard-split
+
+        string line1 = s.Substring(0, splitAt).TrimEnd();
+        string line2 = s.Substring(splitAt).TrimStart();
+
+        if (line2.Length > maxPerLine)
+            line2 = TrimLine(line2, maxPerLine);
+
+        return line2.Length > 0 ? line1 + "\n" + line2 : line1;
+    }
+
+    /// <summary>Truncates a single line to maxLen, ending with "..." if cut.</summary>
+    private static string TrimLine(string line, int maxLen)
+    {
+        if (line.Length <= maxLen) return line;
+        return line.Substring(0, maxLen - 3) + "...";
     }
 
     // =====================================================================

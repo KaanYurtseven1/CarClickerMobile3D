@@ -137,12 +137,64 @@ public class BuildingManager : MonoBehaviour
         return cost;
     }
 
+    // ═══════════════════════ Progression Lock ═══════════════════════
+
+    /// <summary>
+    /// Returns true if the building is progression-locked.
+    /// A building with ID > 0 is locked unless the previous building (ID - 1) has count >= 1.
+    /// StreetDeals (ID=0) is never locked.
+    /// </summary>
+    public bool IsBuildingLocked(BuildingType type)
+    {
+        int id = (int)type;
+
+        // First building is always available
+        if (id <= 0) return false;
+
+        // Look up the previous building by ID
+        BuildingType prevType = (BuildingType)(id - 1);
+        BuildingDefinition prev = GetBuilding(prevType);
+
+        // If previous building doesn't exist in data, treat as unlocked (safety)
+        if (prev == null) return false;
+
+        return prev.count < 1;
+    }
+
+    /// <summary>
+    /// Full pre-purchase eligibility check: not locked, not at max, and can afford.
+    /// Used by UI to determine interactable state.
+    /// </summary>
+    public bool CanBuyBuilding(BuildingType type)
+    {
+        if (CurrencyManager.Instance == null) return false;
+
+        if (IsBuildingLocked(type)) return false;
+
+        BuildingDefinition b = GetBuilding(type);
+        if (b == null) return false;
+
+        if (b.maxCount > 0 && b.count >= b.maxCount) return false;
+
+        double cost = GetCurrentCost(type);
+        return CurrencyManager.Instance.money >= cost;
+    }
+
+    // ═══════════════════════ Purchase ═══════════════════════
+
     public bool TryBuyBuilding(BuildingType type)
     {
         if (CurrencyManager.Instance == null) return false;
 
         BuildingDefinition b = GetBuilding(type);
         if (b == null) return false;
+
+        // ── Hard progression-lock guard ──
+        if (IsBuildingLocked(type))
+        {
+            Debug.Log($"[BuildingManager] Purchase blocked — '{b.displayName}' is progression-locked (previous building not owned).");
+            return false;
+        }
 
         // Capture state BEFORE purchase for validation
         int countBefore = b.count;
@@ -160,12 +212,11 @@ public class BuildingManager : MonoBehaviour
         double cost = GetCurrentCost(type);
         bool canAfford = moneyBefore >= cost;
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
         if (enableEconomyDebugLogs)
         {
-            Debug.Log($"[BUY_ATTEMPT] type={type} | countBefore={countBefore} | cost={cost:F2} | moneyBefore={moneyBefore:F2} | canAfford={canAfford}");
+            Debug.Log($"[BUY_ATTEMPT] type={type} | countBefore={countBefore} | " +
+                      $"cost={cost:F2} | moneyBefore={moneyBefore:F2} | canAfford={canAfford}");
         }
-#endif
 
         // Can afford?
         if (!CurrencyManager.Instance.TrySpendMoney(cost))
@@ -205,7 +256,6 @@ public class BuildingManager : MonoBehaviour
         // Calculate NEXT cost (for the newly incremented count)
         double nextCost = GetCurrentCost(type);
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
         if (enableEconomyDebugLogs)
         {
             Debug.Log($"[BUY_RESULT] success=true | moneyAfter={moneyAfter:F2} | countAfter={b.count} | " +
@@ -229,7 +279,6 @@ public class BuildingManager : MonoBehaviour
                 Debug.LogWarning($"[ECONOMY_BUG] MPT delta mismatch! Expected={tapIncrease:F2}, Actual={mptActualDelta:F2}, Diff={Math.Abs(mptActualDelta - tapIncrease):F6}");
             }
         }
-#endif
 
         // Fire event for UI updates
         OnBuildingPurchased?.Invoke(type, b.count);

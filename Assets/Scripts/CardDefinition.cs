@@ -18,6 +18,10 @@ public class CardDefinition
     [Tooltip("Small icon used in card collection UI and card slot thumbnails.")]
     public Sprite icon;
 
+    [Tooltip("Grayscale mini art shown in the collection grid when the card is not yet discovered.\n"
+           + "Assign the matching UnCardMini sprite. If left empty, falls back to icon + alpha tint.")]
+    public Sprite lockedIcon;
+
     [Tooltip("Full card artwork / background sprite shown in the world reward card reveal."
            + " If left empty, falls back to the icon sprite.")]
     public Sprite cardArtSprite;

@@ -16,5 +16,8 @@ MonoBehaviour:
   popupPanelSprite: {fileID: 21300000, guid: 3c4dc4f840e23334fa05f68c2c02713a, type: 3}
   upgradeButtonSprite: {fileID: 21300000, guid: 37c2d3a7d8d241647a9eca87d06c2d9f, type: 3}
   displayNameOverride: SMALL INVESTMENT
-  valueText: 
-  descriptionText: 
+  valueText: Refund {PERCENT}% of all money & nitro spent\n
+  descriptionText: 'Get a percentage of every purchase back.\n
+
+    Higher level
+    = bigger cashback.'

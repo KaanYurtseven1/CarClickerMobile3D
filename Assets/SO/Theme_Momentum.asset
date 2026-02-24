@@ -16,5 +16,11 @@ MonoBehaviour:
   popupPanelSprite: {fileID: 21300000, guid: ce2e424cfa6b32340bc76f1e94534fea, type: 3}
   upgradeButtonSprite: {fileID: 21300000, guid: ad2504c105716fd45a1c543faf0a2fc2, type: 3}
   displayNameOverride: MOMENTUM
-  valueText: 
-  descriptionText: 
+  valueText: 'Up to x{MAX_MULT} tap income ({CAP} stacks)\n
+
+    Reset window: {WINDOW}s
+    | +{BONUS_PCT}% per tap'
+  descriptionText: 'Keep tapping without stopping to build combo\n
+
+    stacks.
+    More stacks = more tap income.'

@@ -4,6 +4,22 @@ using DG.Tweening;
 
 public class ChestOpenSceneController : MonoBehaviour
 {
+    // ── Debug Instrumentation ─────────────────────────────────────────
+    [Header("Debug")]
+    [SerializeField] private bool debugLogs = false;
+
+    private void DLog(string msg)
+    {
+        if (!debugLogs) return;
+        Debug.Log($"[ChestOpenCtrl][{name}#{GetInstanceID()}] t={Time.time:F2} rt={Time.realtimeSinceStartup:F2} f={Time.frameCount} scene={UnityEngine.SceneManagement.SceneManager.GetActiveScene().name} | {msg}");
+    }
+
+    private void DWarn(string msg)
+    {
+        Debug.LogWarning($"[ChestOpenCtrl][{name}#{GetInstanceID()}] t={Time.time:F2} rt={Time.realtimeSinceStartup:F2} f={Time.frameCount} scene={UnityEngine.SceneManagement.SceneManager.GetActiveScene().name} | {msg}");
+    }
+    // ──────────────────────────────────────────────────────────────────
+
     // 
     //  PHASE STATE MACHINE
     // 
@@ -120,14 +136,18 @@ public class ChestOpenSceneController : MonoBehaviour
     {
         if (cam == null) cam = Camera.main;
 
+        DLog($"Start ENTRY — ChestInventoryManager.Instance={(ChestInventoryManager.Instance != null ? ChestInventoryManager.Instance.name + "#" + ChestInventoryManager.Instance.GetInstanceID() : "NULL")}");
+
         // ── Bug #7 fix: read pending chest ONCE, cache in-memory, clear PlayerPrefs key immediately ──
         cachedChestData = ReadAndClearPendingChest();
         if (cachedChestData == null)
         {
             Debug.LogError("[ChestOpenScene] No pending chest data on scene entry! Returning to Main safely.");
+            DWarn("Start — cachedChestData is NULL after ReadAndClearPendingChest, loading Main");
             SceneManager.LoadScene("Main");
             return;
         }
+        DLog($"Start — cachedChestData OK: name='{cachedChestData.chestName}' cardReward={cachedChestData.cardReward}");
 
         //  Validation 
         if (revealController == null)
@@ -148,13 +168,22 @@ public class ChestOpenSceneController : MonoBehaviour
     /// </summary>
     private ChestInventoryManager.ChestData ReadAndClearPendingChest()
     {
+        DLog($"ReadAndClearPendingChest ENTRY — ChestInventoryManager.Instance={(ChestInventoryManager.Instance != null ? "EXISTS (" + ChestInventoryManager.Instance.name + "#" + ChestInventoryManager.Instance.GetInstanceID() + ")" : "NULL")}");
+
         if (ChestInventoryManager.Instance == null)
         {
             Debug.LogError("[ChestOpenScene] ChestInventoryManager.Instance is NULL!");
+            if (debugLogs)
+            {
+                DWarn("ReadAndClearPendingChest — Instance is NULL, printing stack trace for diagnosis");
+                Debug.LogWarning(System.Environment.StackTrace);
+            }
             return null;
         }
 
+        DLog("ReadAndClearPendingChest — calling GetPendingOpenChest()");
         var data = ChestInventoryManager.Instance.GetPendingOpenChest();
+        DLog($"ReadAndClearPendingChest — GetPendingOpenChest returned {(data != null ? $"'{data.chestName}'" : "NULL")}");
         if (data != null)
         {
             // Clear immediately — this is the critical fix for Bug #7.

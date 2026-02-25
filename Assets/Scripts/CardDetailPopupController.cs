@@ -102,7 +102,9 @@ public class CardDetailPopupController : MonoBehaviour
     private Dictionary<CardType, CardPopupThemeSO> _themeCache;
     private bool isAnimating;
     private Sequence currentSequence;
-
+    // ANIMATION ONLY: progress bar visual transition, logic unchanged
+    private SegmentedProgressBarAnimator barAnimator;
+    private int lastFilledCount; // cached for animated reveal after open / upgrade
     // =====================================================================
     // Unity Lifecycle
     // =====================================================================
@@ -113,6 +115,13 @@ public class CardDetailPopupController : MonoBehaviour
 
         // Build O(1) theme lookup from database
         BuildThemeCache();
+
+        // ANIMATION ONLY: progress bar visual transition, logic unchanged
+        barAnimator = gameObject.GetComponent<SegmentedProgressBarAnimator>();
+        if (barAnimator == null)
+            barAnimator = gameObject.AddComponent<SegmentedProgressBarAnimator>();
+        if (fillSegments != null && fillSegments.Length > 0)
+            barAnimator.Init(fillSegments);
 
         // Wire button listeners
         if (upgradeButton != null)
@@ -172,6 +181,10 @@ public class CardDetailPopupController : MonoBehaviour
         // Apply per-card theme visuals, then refresh data-driven UI
         ApplyTheme(def);
         RefreshUI();
+
+        // ANIMATION ONLY: hide fill segments before open animation starts
+        if (barAnimator != null && barAnimator.IsInitialized)
+            barAnimator.HideAllImmediate();
 
         // ── Open animation ──────────────────────────────────────────────
         PlayOpenAnimation();
@@ -236,6 +249,10 @@ public class CardDetailPopupController : MonoBehaviour
                 isAnimating = false;
                 if (rootCanvasGroup != null)
                     rootCanvasGroup.blocksRaycasts = true;
+
+                // ANIMATION ONLY: reveal filled segments after popup open anim
+                if (barAnimator != null && barAnimator.IsInitialized)
+                    barAnimator.PlayReveal(lastFilledCount);
             })
             .OnKill(() =>
             {
@@ -413,6 +430,11 @@ public class CardDetailPopupController : MonoBehaviour
 
         // 8-segment progress bar
         UpdateSegments(filledSegmentCount);
+        lastFilledCount = filledSegmentCount; // cache for animator
+
+        // ANIMATION ONLY: if popup is already open (e.g. after upgrade), animate the change
+        if (!isAnimating && IsOpen && barAnimator != null && barAnimator.IsInitialized)
+            barAnimator.PlayReveal(filledSegmentCount);
 
         // Legacy fill bar (optional fallback)
         if (progressFill != null)
@@ -617,32 +639,32 @@ public class CardDetailPopupController : MonoBehaviour
     private static readonly float[] TF_Multipliers = { 1f, 5f, 10f, 20f, 50f, 100f, 200f };
 
     // NitroRain: RequiredCollects and RainDurations — index = card level
-    private static readonly int[]   NR_Collects  = { 0, 3, 4, 5, 6, 7, 8 };
+    private static readonly int[] NR_Collects = { 0, 3, 4, 5, 6, 7, 8 };
     private static readonly float[] NR_Durations = { 0f, 5f, 8f, 11f, 14f, 17f, 20f };
 
     // PitStopCrew: EfficiencyByLevel (fraction) and CapHoursByLevel
     private static readonly float[] PS_Efficiency = { 0f, 0.20f, 0.30f, 0.40f, 0.55f, 0.70f, 0.85f };
-    private static readonly float[] PS_CapHours   = { 0f, 2f, 3f, 4f, 6f, 8f, 12f };
+    private static readonly float[] PS_CapHours = { 0f, 2f, 3f, 4f, 6f, 8f, 12f };
 
     // GarageManager: BonusMultipliers and SpendSecondsEquivalents
-    private static readonly float[] GM_Multipliers  = { 0f, 10f, 11f, 12f, 13f, 14f, 15f };
+    private static readonly float[] GM_Multipliers = { 0f, 10f, 11f, 12f, 13f, 14f, 15f };
     private static readonly float[] GM_SpendSeconds = { 0f, 30f, 28f, 26f, 24f, 22f, 20f };
 
     // SmallInvestment: base 2%, +2% per level, cap 12%
     private const float SI_Base = 2f;
     private const float SI_Step = 2f;
-    private const float SI_Cap  = 12f;
+    private const float SI_Cap = 12f;
 
     // Momentum: scaling helpers
-    private const float MO_BaseWindow    = 0.80f;
-    private const float MO_WindowStep    = 0.20f;
-    private const float MO_BaseBonus     = 0.005f;
-    private const float MO_BonusStep     = 0.002f;
-    private const int   MO_BaseCap       = 30;
-    private const int   MO_CapStep       = 10;
+    private const float MO_BaseWindow = 0.80f;
+    private const float MO_WindowStep = 0.20f;
+    private const float MO_BaseBonus = 0.005f;
+    private const float MO_BonusStep = 0.002f;
+    private const int MO_BaseCap = 30;
+    private const int MO_CapStep = 10;
 
     // NitroMagnet: taps required and coins to collect (index = level - 1)
-    private static readonly int[] NM_Taps  = { 30, 40, 50, 55, 60, 70 };
+    private static readonly int[] NM_Taps = { 30, 40, 50, 55, 60, 70 };
     private static readonly int[] NM_Coins = { 3, 4, 5, 7, 9, 12 };
 
     /// <summary>
@@ -657,77 +679,77 @@ public class CardDetailPopupController : MonoBehaviour
         switch (def.type)
         {
             case CardType.TurboFinger:
-            {
-                int idx = Mathf.Clamp(lv, 0, TF_Multipliers.Length - 1);
-                float mult = TF_Multipliers[idx];
-                return $"Tap income x{mult:G} for 30s\nActivate: 50 taps/15s | CD: 120s";
-            }
+                {
+                    int idx = Mathf.Clamp(lv, 0, TF_Multipliers.Length - 1);
+                    float mult = TF_Multipliers[idx];
+                    return $"Tap income x{mult:G} for 30s\nActivate: 50 taps/15s | CD: 120s";
+                }
 
             case CardType.NitroRain:
-            {
-                int idx = Mathf.Clamp(lv, 0, NR_Collects.Length - 1);
-                int req = NR_Collects[idx];
-                float dur = NR_Durations[idx];
-                return $"Collect {req} nitro to start rain ({dur:G}s)\n30s delay before rain";
-            }
+                {
+                    int idx = Mathf.Clamp(lv, 0, NR_Collects.Length - 1);
+                    int req = NR_Collects[idx];
+                    float dur = NR_Durations[idx];
+                    return $"Collect {req} nitro to start rain ({dur:G}s)\n30s delay before rain";
+                }
 
             case CardType.PitStopCrew:
-            {
-                int idx = Mathf.Clamp(lv, 0, PS_Efficiency.Length - 1);
-                int eff = Mathf.RoundToInt(PS_Efficiency[idx] * 100f);
-                float cap = PS_CapHours[idx];
-                return $"Offline earn: {eff}% of MPS (max {cap:G}h)";
-            }
+                {
+                    int idx = Mathf.Clamp(lv, 0, PS_Efficiency.Length - 1);
+                    int eff = Mathf.RoundToInt(PS_Efficiency[idx] * 100f);
+                    float cap = PS_CapHours[idx];
+                    return $"Offline earn: {eff}% of MPS (max {cap:G}h)";
+                }
 
             case CardType.GarageManager:
-            {
-                int idx = Mathf.Clamp(lv, 0, GM_Multipliers.Length - 1);
-                float mult = GM_Multipliers[idx];
-                float secs = GM_SpendSeconds[idx];
-                return $"MPS x{mult:G} for 60s | CD: 120s\nSpend {secs:G}s of MPS to trigger";
-            }
+                {
+                    int idx = Mathf.Clamp(lv, 0, GM_Multipliers.Length - 1);
+                    float mult = GM_Multipliers[idx];
+                    float secs = GM_SpendSeconds[idx];
+                    return $"MPS x{mult:G} for 60s | CD: 120s\nSpend {secs:G}s of MPS to trigger";
+                }
 
             case CardType.BoostMode:
-            {
-                int clampLv = Mathf.Clamp(lv, 1, 6);
-                float mult = clampLv * 10f;
-                int maxCharge = 5 + clampLv * 5;
-                float cd = 30f + clampLv * 15f;
-                return $"All income x{mult:G} for 10s\nCharge: {maxCharge} nitro | CD: {cd:G}s";
-            }
+                {
+                    int clampLv = Mathf.Clamp(lv, 1, 6);
+                    float mult = clampLv * 10f;
+                    int maxCharge = 5 + clampLv * 5;
+                    float cd = 30f + clampLv * 15f;
+                    return $"All income x{mult:G} for 10s\nCharge: {maxCharge} nitro | CD: {cd:G}s";
+                }
 
             case CardType.SmallInvestment:
-            {
-                float pct = Mathf.Clamp(SI_Base + (lv - 1) * SI_Step, 0f, SI_Cap);
-                return $"Refund {pct:G}% of all money & nitro spent";
-            }
+                {
+                    float pct = Mathf.Clamp(SI_Base + (lv - 1) * SI_Step, 0f, SI_Cap);
+                    return $"Refund {pct:G}% of all money & nitro spent";
+                }
 
             case CardType.Momentum:
-            {
-                float win = MO_BaseWindow + (lv - 1) * MO_WindowStep;
-                float bonus = MO_BaseBonus + (lv - 1) * MO_BonusStep;
-                int cap = MO_BaseCap + (lv - 1) * MO_CapStep;
-                float maxMult = 1f + cap * bonus;
-                float pctPerTap = bonus * 100f;
-                return $"Up to x{maxMult:F2} tap income ({cap} stacks)\nReset: {win:F1}s | +{pctPerTap:G}%/tap";
-            }
+                {
+                    float win = MO_BaseWindow + (lv - 1) * MO_WindowStep;
+                    float bonus = MO_BaseBonus + (lv - 1) * MO_BonusStep;
+                    int cap = MO_BaseCap + (lv - 1) * MO_CapStep;
+                    float maxMult = 1f + cap * bonus;
+                    float pctPerTap = bonus * 100f;
+                    return $"Up to x{maxMult:F2} tap income ({cap} stacks)\nReset: {win:F1}s | +{pctPerTap:G}%/tap";
+                }
 
             case CardType.NitroMagnet:
-            {
-                int idx = Mathf.Clamp(lv - 1, 0, NM_Taps.Length - 1);
-                int taps = NM_Taps[idx];
-                int coins = NM_Coins[idx];
-                return $"Tap {taps}x to arm | Auto-pull {coins} nitro";
-            }
+                {
+                    int idx = Mathf.Clamp(lv - 1, 0, NM_Taps.Length - 1);
+                    int taps = NM_Taps[idx];
+                    int coins = NM_Coins[idx];
+                    return $"Tap {taps}x to arm | Auto-pull {coins} nitro";
+                }
 
             default:
-            {
-                // Fallback: try theme static text
-                if (_themeCache != null && _themeCache.TryGetValue(def.type, out var theme)
-                    && !string.IsNullOrEmpty(theme.valueText))
-                    return theme.valueText;
-                return $"Level {lv} active.";
-            }
+                {
+                    // Fallback: try theme static text
+                    if (_themeCache != null && _themeCache.TryGetValue(def.type, out var theme)
+                        && !string.IsNullOrEmpty(theme.valueText))
+                        return theme.valueText;
+                    return $"Level {lv} active.";
+                }
         }
     }
 
@@ -764,13 +786,13 @@ public class CardDetailPopupController : MonoBehaviour
                 return "Tap to charge the magnet. When armed, nearby\nnitro coins fly to your car automatically.";
 
             default:
-            {
-                // Fallback: try theme static text
-                if (_themeCache != null && _themeCache.TryGetValue(def.type, out var theme)
-                    && !string.IsNullOrEmpty(theme.descriptionText))
-                    return theme.descriptionText;
-                return $"Rarity: {def.rarity}";
-            }
+                {
+                    // Fallback: try theme static text
+                    if (_themeCache != null && _themeCache.TryGetValue(def.type, out var theme)
+                        && !string.IsNullOrEmpty(theme.descriptionText))
+                        return theme.descriptionText;
+                    return $"Rarity: {def.rarity}";
+                }
         }
     }
 

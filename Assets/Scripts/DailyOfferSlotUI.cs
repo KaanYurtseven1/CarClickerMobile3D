@@ -30,7 +30,10 @@ public class DailyOfferSlotUI : MonoBehaviour
 
     [Tooltip("Label shown after purchase/claim (e.g. 'CLAIMED').")]
     public TMP_Text purchasedText;
-
+    // DAILY OFFERS: countdown + slot gating (UI only)
+    [Header("Lock Overlay (optional)")]
+    [Tooltip("Optional CanvasGroup on the slot root — used to dim when locked. If null, one is added at runtime.")]
+    [SerializeField] private CanvasGroup slotCanvasGroup;
     [Header("Card-Slot Only (leave null for Free slot)")]
     [Tooltip("Progress bar fill image (legacy fillAmount — optional if using segments).")]
     public Image barFill;
@@ -56,7 +59,20 @@ public class DailyOfferSlotUI : MonoBehaviour
     private const float GhostAlphaEnd = 0f;
     private const float TweenDuration = 0.1f;
 
+    // ANIMATION ONLY: progress bar visual transition, logic unchanged
+    private SegmentedProgressBarAnimator barAnimator;
+
     // ──────────────────────────────── Lifecycle ────────────────────────────────
+
+    private void Awake()
+    {
+        // ANIMATION ONLY: progress bar visual transition, logic unchanged
+        barAnimator = GetComponent<SegmentedProgressBarAnimator>();
+        if (barAnimator == null)
+            barAnimator = gameObject.AddComponent<SegmentedProgressBarAnimator>();
+        if (fillSegments != null && fillSegments.Length > 0)
+            barAnimator.Init(fillSegments);
+    }
 
     private void OnDestroy()
     {
@@ -75,6 +91,7 @@ public class DailyOfferSlotUI : MonoBehaviour
         if (freeText != null) { freeText.gameObject.SetActive(true); freeText.text = labelText; }
         if (purchasedText != null) purchasedText.gameObject.SetActive(false);
         if (button != null) button.interactable = true;
+        SetDimmed(false); // DAILY OFFERS: ensure full alpha when available
     }
 
     /// <summary>
@@ -85,6 +102,41 @@ public class DailyOfferSlotUI : MonoBehaviour
         if (freeText != null) freeText.gameObject.SetActive(false);
         if (purchasedText != null) { purchasedText.gameObject.SetActive(true); purchasedText.text = labelText; }
         if (button != null) button.interactable = false;
+        SetDimmed(false); // DAILY OFFERS: purchased state uses full alpha (text says PURCHASED)
+    }
+
+    // DAILY OFFERS: countdown + slot gating (UI only)
+    /// <summary>
+    /// Show the slot in "locked" state — card not yet owned by the player.
+    /// Button is disabled and slot is visually dimmed.
+    /// </summary>
+    public void SetLocked(string labelText = "LOCKED")
+    {
+        if (freeText != null) { freeText.gameObject.SetActive(true); freeText.text = labelText; }
+        if (purchasedText != null) purchasedText.gameObject.SetActive(false);
+        if (button != null) button.interactable = false;
+        SetDimmed(true);
+    }
+
+    /// <summary>
+    /// Dims or restores the slot via CanvasGroup alpha.
+    /// </summary>
+    private void SetDimmed(bool dimmed)
+    {
+        EnsureCanvasGroup();
+        if (slotCanvasGroup != null)
+            slotCanvasGroup.alpha = dimmed ? 0.45f : 1f;
+    }
+
+    /// <summary>
+    /// Lazily ensures a CanvasGroup exists for dimming.
+    /// </summary>
+    private void EnsureCanvasGroup()
+    {
+        if (slotCanvasGroup != null) return;
+        slotCanvasGroup = GetComponent<CanvasGroup>();
+        if (slotCanvasGroup == null)
+            slotCanvasGroup = gameObject.AddComponent<CanvasGroup>();
     }
 
     /// <summary>
@@ -97,6 +149,13 @@ public class DailyOfferSlotUI : MonoBehaviour
         int filledCount = Mathf.Clamp(Mathf.RoundToInt(fill01 * CardDropTuning.SegmentsPerUpgrade), 0, CardDropTuning.SegmentsPerUpgrade);
         UpdateProgressBar(filledCount);
         if (progressText != null) progressText.text = text;
+
+        // ANIMATION ONLY: staggered reveal after logic sets segments
+        if (barAnimator != null && barAnimator.IsInitialized)
+        {
+            barAnimator.HideAllImmediate();
+            barAnimator.PlayReveal(filledCount);
+        }
     }
 
     /// <summary>
@@ -107,6 +166,13 @@ public class DailyOfferSlotUI : MonoBehaviour
         int filledCount = Mathf.Clamp(segmentBalance, 0, CardDropTuning.SegmentsPerUpgrade);
         UpdateProgressBar(filledCount);
         if (progressText != null) progressText.text = text;
+
+        // ANIMATION ONLY: staggered reveal after logic sets segments
+        if (barAnimator != null && barAnimator.IsInitialized)
+        {
+            barAnimator.HideAllImmediate();
+            barAnimator.PlayReveal(filledCount);
+        }
     }
 
     /// <summary>

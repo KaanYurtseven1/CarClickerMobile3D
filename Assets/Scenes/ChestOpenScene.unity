@@ -3395,7 +3395,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &1770279798
 Transform:
   m_ObjectHideFlags: 0
@@ -3430,6 +3430,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 17c0edb6132761249a7f042358f4816e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ChestRewardRevealController
+  debugLogs: 1
   worldTitle: {fileID: 2114105832}
   worldSubtitle: {fileID: 31290948}
   worldValue: {fileID: 417706395}
@@ -3437,14 +3438,14 @@ MonoBehaviour:
   barBGParent: {fileID: 964045587}
   barFillParent: {fileID: 514426539}
   bgSegments:
-  - {fileID: 831164124}
-  - {fileID: 583885757}
-  - {fileID: 1618625185}
-  - {fileID: 1532922453}
-  - {fileID: 1400374679}
-  - {fileID: 1416810725}
-  - {fileID: 1606194285}
-  - {fileID: 766386935}
+  - {fileID: 1738281532}
+  - {fileID: 508736231}
+  - {fileID: 307141717}
+  - {fileID: 683589964}
+  - {fileID: 1171754003}
+  - {fileID: 431137861}
+  - {fileID: 1767531022}
+  - {fileID: 596234674}
   fillSegments:
   - {fileID: 831164124}
   - {fileID: 583885757}
@@ -3470,6 +3471,7 @@ MonoBehaviour:
   summaryFadeDuration: 0.3
   charTypewriterStagger: 0.03
   charTypewriterFadeDuration: 0.15
+  barBounceInDuration: 0.35
   bgFadeInDuration: 0.3
   segmentPopDuration: 0.18
   segmentStaggerDelay: 0.1
@@ -3609,6 +3611,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4b1587adb84e81e43aa391cadd10f7f2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ChestOpenSceneController
+  debugLogs: 1
   cam: {fileID: 2069609046}
   spawnPoint: {fileID: 1346072323}
   chestPrefab: {fileID: 3751765518473777022, guid: c1b73c8156f94d5439b212be54be40b7, type: 3}

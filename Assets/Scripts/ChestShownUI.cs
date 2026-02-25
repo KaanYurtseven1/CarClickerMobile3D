@@ -5,6 +5,17 @@ public class ChestShownUI : MonoBehaviour
 {
     public static ChestShownUI Instance;
 
+    // ── Debug Instrumentation ─────────────────────────────────────────
+    [Header("Debug")]
+    [SerializeField] private bool debugLogs = false;
+
+    private void DLog(string msg)
+    {
+        if (!debugLogs) return;
+        Debug.Log($"[ChestShownUI][{name}#{GetInstanceID()}] t={Time.time:F2} rt={Time.realtimeSinceStartup:F2} f={Time.frameCount} scene={UnityEngine.SceneManagement.SceneManager.GetActiveScene().name} | {msg}");
+    }
+    // ──────────────────────────────────────────────────────────────────
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
     {
@@ -89,6 +100,8 @@ public class ChestShownUI : MonoBehaviour
     // ChestShown ikonuna tıklama (Button OnClick)
     public void OnChestShownTapped()
     {
+        DLog($"OnChestShownTapped — ChestInventoryManager.Instance={(ChestInventoryManager.Instance != null ? "EXISTS" : "NULL")} ChestPopupController.Instance={(ChestPopupController.Instance != null ? "EXISTS" : "NULL")}");
+
         Debug.Log("[ChestShownUI] Trying to open popup...");
 
         Debug.Log("[ChestShownUI] ChestPopupController.Instance = " + (ChestPopupController.Instance != null));

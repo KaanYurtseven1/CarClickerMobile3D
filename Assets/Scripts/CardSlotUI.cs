@@ -37,6 +37,9 @@ public class CardSlotUI : MonoBehaviour
     private CardDefinition card;
     private System.Action<CardDefinition> onClick;
 
+    // ANIMATION ONLY: progress bar visual transition, logic unchanged
+    private SegmentedProgressBarAnimator barAnimator;
+
     // ────────────────────────────────────────────
 
     private void Awake()
@@ -46,6 +49,13 @@ public class CardSlotUI : MonoBehaviour
 
         if (button != null)
             button.onClick.AddListener(OnClickInternal);
+
+        // ANIMATION ONLY: progress bar visual transition, logic unchanged
+        barAnimator = GetComponent<SegmentedProgressBarAnimator>();
+        if (barAnimator == null)
+            barAnimator = gameObject.AddComponent<SegmentedProgressBarAnimator>();
+        if (fillSegments != null && fillSegments.Length > 0)
+            barAnimator.Init(fillSegments);
     }
 
     private void OnDestroy()
@@ -110,6 +120,13 @@ public class CardSlotUI : MonoBehaviour
 
         // PROGRESS BAR: segmented toggle
         UpdateSegments(filledSegments);
+
+        // ANIMATION ONLY: hide then reveal segments with staggered pop-in
+        if (barAnimator != null && barAnimator.IsInitialized)
+        {
+            barAnimator.HideAllImmediate();
+            barAnimator.PlayReveal(filledSegments);
+        }
 
         // ICON: swap sprite for locked/unlocked state
         if (iconImage != null)

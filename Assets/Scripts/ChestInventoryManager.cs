@@ -6,6 +6,17 @@ public class ChestInventoryManager : MonoBehaviour
 {
     public static ChestInventoryManager Instance;
 
+    // ── Debug Instrumentation ─────────────────────────────────────────
+    [Header("Debug")]
+    [SerializeField] private bool debugLogs = false;
+
+    private void DLog(string msg)
+    {
+        if (!debugLogs) return;
+        Debug.Log($"[ChestInvMgr][{name}#{GetInstanceID()}] t={Time.time:F2} rt={Time.realtimeSinceStartup:F2} f={Time.frameCount} scene={UnityEngine.SceneManagement.SceneManager.GetActiveScene().name} | {msg}");
+    }
+    // ──────────────────────────────────────────────────────────────────
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
     {
@@ -48,13 +59,34 @@ public class ChestInventoryManager : MonoBehaviour
 
     private void Awake()
     {
+        DLog($"Awake ENTRY — Instance={(Instance != null ? Instance.name + "#" + Instance.GetInstanceID() : "NULL")} this={name}#{GetInstanceID()}");
+
         if (Instance != null)
         {
+            DLog($"Awake — duplicate detected, destroying self ({name}#{GetInstanceID()}). Keeping existing Instance={Instance.name}#{Instance.GetInstanceID()}");
             Destroy(gameObject);
             return;
         }
         Instance = this;
         DontDestroyOnLoad(gameObject);
+        DLog($"Awake — Instance assigned to {name}#{GetInstanceID()}, DontDestroyOnLoad applied");
+    }
+
+    private void OnEnable()
+    {
+        DLog($"OnEnable — Instance={(Instance != null ? Instance.name + "#" + Instance.GetInstanceID() : "NULL")} this={name}#{GetInstanceID()}");
+    }
+
+    private void Start()
+    {
+        DLog($"Start — Instance={(Instance != null ? Instance.name + "#" + Instance.GetInstanceID() : "NULL")} chests.Count={chests.Count} activeUnlockIndex={activeUnlockIndex}");
+    }
+
+    private void OnDestroy()
+    {
+        bool wasSelf = (Instance == this);
+        if (wasSelf) Instance = null;
+        DLog($"OnDestroy — wasSelf={wasSelf} Instance is now {(Instance != null ? Instance.name + "#" + Instance.GetInstanceID() : "NULL")}");
     }
 
     private void Update()

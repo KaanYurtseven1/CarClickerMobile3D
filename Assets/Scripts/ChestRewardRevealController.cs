@@ -57,6 +57,23 @@ public class ChestRewardPackage
 public class ChestRewardRevealController : MonoBehaviour
 {
     // ──────────────────────────────────────────────────────────────────
+    //  DEBUG INSTRUMENTATION
+    // ──────────────────────────────────────────────────────────────────
+    [Header("Debug")]
+    [SerializeField] private bool debugLogs = false;
+
+    private void DLog(string msg)
+    {
+        if (!debugLogs) return;
+        Debug.Log($"[RewardReveal][{name}#{GetInstanceID()}] t={Time.time:F2} rt={Time.realtimeSinceStartup:F2} f={Time.frameCount} | {msg}");
+    }
+
+    private void DWarn(string msg)
+    {
+        Debug.LogWarning($"[RewardReveal][{name}#{GetInstanceID()}] t={Time.time:F2} rt={Time.realtimeSinceStartup:F2} f={Time.frameCount} | {msg}");
+    }
+
+    // ──────────────────────────────────────────────────────────────────
     //  WORLD-SPACE INFO TEXTS (3D TMP)
     // ──────────────────────────────────────────────────────────────────
     [Header("World-Space Info Texts")]
@@ -126,6 +143,8 @@ public class ChestRewardRevealController : MonoBehaviour
     [SerializeField] private float charTypewriterFadeDuration = 0.15f;
 
     [Header("Progress Bar Animation")]
+    [Tooltip("Duration for BarPart to bounce in (scale 0\u21921) while text animations play")]
+    [SerializeField] private float barBounceInDuration = 0.35f;
     [Tooltip("Duration for Bar_BG segments to fade in (alpha 0\u21921) before fill starts")]
     [SerializeField] private float bgFadeInDuration = 0.30f;
     [Tooltip("Duration for each fill segment's pop-in (alpha + scale)")]
@@ -151,6 +170,11 @@ public class ChestRewardRevealController : MonoBehaviour
 
     private const int SegmentCount = 8;
 
+    // ── Duplicate-call detection (logging only, does NOT gate execution) ──
+    private bool _isFadingTexts;
+    private bool _isShowingProgress;
+    private bool _isBouncingBar;
+
     public Sprite MoneySprite => moneySprite;
     public Sprite NitroSprite => nitroSprite;
 
@@ -163,6 +187,16 @@ public class ChestRewardRevealController : MonoBehaviour
         AutoResolveSegments();
         CacheSegmentScales();
         HideAll();
+
+        // 1-time null-reference warnings
+        if (progressRoot == null) DWarn("CRITICAL: progressRoot is NULL");
+        if (worldTitle == null) DWarn("CRITICAL: worldTitle TMP is NULL");
+        if (worldSubtitle == null) DWarn("CRITICAL: worldSubtitle TMP is NULL");
+        if (worldValue == null) DWarn("CRITICAL: worldValue TMP is NULL");
+        if (barBGParent == null) DWarn("CRITICAL: barBGParent is NULL");
+        if (barFillParent == null) DWarn("CRITICAL: barFillParent is NULL");
+        if (bgSegments == null || bgSegments.Length == 0) DWarn("CRITICAL: bgSegments array is empty/null");
+        if (fillSegments == null || fillSegments.Length == 0) DWarn("CRITICAL: fillSegments array is empty/null");
     }
 
     /// <summary>
@@ -171,7 +205,7 @@ public class ChestRewardRevealController : MonoBehaviour
     /// </summary>
     private void AutoResolveSegments()
     {
-        bgSegments   = ResolveSegmentArray(bgSegments,   barBGParent,   "Bar_BG");
+        bgSegments = ResolveSegmentArray(bgSegments, barBGParent, "Bar_BG");
         fillSegments = ResolveSegmentArray(fillSegments, barFillParent, "Bar_Fill");
     }
 
@@ -235,15 +269,34 @@ public class ChestRewardRevealController : MonoBehaviour
     /// <summary>Kill any running per-character vertex tweens on the three world TMP labels.</summary>
     private void KillPerCharTweens()
     {
-        if (worldTitle    != null) DOTween.Kill(worldTitle.GetInstanceID());
+        if (worldTitle != null) DOTween.Kill(worldTitle.GetInstanceID());
         if (worldSubtitle != null) DOTween.Kill(worldSubtitle.GetInstanceID());
-        if (worldValue    != null) DOTween.Kill(worldValue.GetInstanceID());
+        if (worldValue != null) DOTween.Kill(worldValue.GetInstanceID());
     }
 
-    /// <summary>Kill any running segment fill tweens and snap to final state.</summary>
+    /// <summary>Kill any running segment fill tweens. Hides all fill segments
+    /// immediately to prevent a single-frame flash from OnKill snap callbacks.</summary>
     private void KillSegmentTweens()
     {
+        DLog("KillSegmentTweens — killing RevealSegmentFill tweens");
         DOTween.Kill("RevealSegmentFill");
+
+        // Immediately hide all fill segments so the OnKill → SnapFillSegments
+        // flash is overridden in the same frame before rendering.
+        int hiddenCount = 0;
+        if (fillSegments != null)
+        {
+            for (int i = 0; i < fillSegments.Length; i++)
+            {
+                if (fillSegments[i] != null)
+                {
+                    fillSegments[i].enabled = false;
+                    SetSRAlpha(fillSegments[i], 0f);
+                    hiddenCount++;
+                }
+            }
+        }
+        DLog($"KillSegmentTweens — hid {hiddenCount} fill segments");
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -262,7 +315,8 @@ public class ChestRewardRevealController : MonoBehaviour
     public void ShowMoneyInfo(Action onComplete)
     {
         if (_rewards == null) { Debug.LogError("[RewardReveal] _rewards is null!"); onComplete?.Invoke(); return; }
-        Debug.Log($"[RewardReveal] ShowMoneyInfo {_rewards.moneyMultiplier}x => {_rewards.finalMoneyShown:N0}");
+        DLog($"ShowMoneyInfo ENTRY — multiplier={_rewards.moneyMultiplier} finalMoney={_rewards.finalMoneyShown}");
+        Debug.Log($"[RewardReveal] ShowMoneyInfo {_rewards.moneyMultiplier}x => {_rewards.finalMoneyShown:N0}"); ;
         SetWorldTexts("Money", "Resource Card", FormatMoney(_rewards.finalMoneyShown));
         HideProgress();
         FadeInWorldTexts(onComplete);
@@ -273,6 +327,7 @@ public class ChestRewardRevealController : MonoBehaviour
     public void ShowNitroInfo(Action onComplete)
     {
         if (_rewards == null) { Debug.LogError("[RewardReveal] _rewards is null!"); onComplete?.Invoke(); return; }
+        DLog($"ShowNitroInfo ENTRY — nitro={_rewards.nitroReward} total={_rewards.finalNitroTotal}");
         Debug.Log($"[RewardReveal] ShowNitroInfo +{_rewards.nitroReward} => {_rewards.finalNitroTotal}");
         SetWorldTexts("Nitro Coin", "Resource Card", $"+{_rewards.nitroReward} Nitro Coins");
         HideProgress();
@@ -284,6 +339,7 @@ public class ChestRewardRevealController : MonoBehaviour
     public void ShowCardInfo(Action onComplete)
     {
         if (_rewards == null) { Debug.LogError("[RewardReveal] _rewards is null!"); onComplete?.Invoke(); return; }
+        DLog($"ShowCardInfo ENTRY — card={_rewards.cardDisplayName} rarity={_rewards.cardRarity} copies={_rewards.cardCopies} pre={_rewards.preRewardCopiesOwned} post={_rewards.postRewardCopiesOwned}");
         Debug.Log($"[RewardReveal] ShowCardInfo {_rewards.cardDisplayName} x{_rewards.cardCopies}");
 
         // A1: Always show rarity for card phase
@@ -294,15 +350,27 @@ public class ChestRewardRevealController : MonoBehaviour
         string title = SanitizeDisplayName(_rewards.cardDisplayName);
         SetWorldTexts(title, sub, "");
 
-        // C: Show progress with animated fill
-        ShowProgressAnimated(
-            _rewards.preRewardCopiesOwned,
-            _rewards.postRewardCopiesOwned,
-            _rewards.postRewardLevel,
-            _rewards.copiesNeededForNext,
-            _rewards.upgradeProgress01
-        );
-        FadeInWorldTexts(onComplete);
+        // Bounce BarPart in (BG visible, fill hidden) while text typewriter runs
+        DLog("ShowCardInfo → calling BounceInBarPart()");
+        BounceInBarPart();
+
+        // After text animations complete, run the fill animation
+        DLog("ShowCardInfo → calling FadeInWorldTexts()");
+        FadeInWorldTexts(() =>
+        {
+            DLog("ShowCardInfo → FadeInWorldTexts COMPLETE, calling ShowProgressAnimated(skipBarIntro=true)");
+            ShowProgressAnimated(
+                _rewards.preRewardCopiesOwned,
+                _rewards.postRewardCopiesOwned,
+                _rewards.postRewardLevel,
+                _rewards.copiesNeededForNext,
+                _rewards.upgradeProgress01,
+                skipBarIntro: true  // bar is already visible from bounce-in
+            );
+            DLog("ShowCardInfo → calling onComplete");
+            onComplete?.Invoke();
+        });
+        DLog("ShowCardInfo EXIT (async chain started)");
     }
 
     //  FADE OUT 
@@ -395,6 +463,7 @@ public class ChestRewardRevealController : MonoBehaviour
 
     public void HideAll()
     {
+        DLog("HideAll called");
         HideWorldTexts();
         HideProgress();
         if (summaryRoot != null) summaryRoot.SetActive(false);
@@ -406,9 +475,13 @@ public class ChestRewardRevealController : MonoBehaviour
 
     private void SetWorldTexts(string title, string subtitle, string value)
     {
-        if (worldTitle    != null) { worldTitle.text    = title;    worldTitle.gameObject.SetActive(true); }
-        if (worldSubtitle != null) { worldSubtitle.text = subtitle; worldSubtitle.gameObject.SetActive(true); }
-        if (worldValue    != null) { worldValue.text    = value;    worldValue.gameObject.SetActive(true); }
+        DLog($"SetWorldTexts — title='{title}' subtitle='{subtitle}' value='{value}'");
+        // Activate labels but keep them invisible (alpha = 0) to prevent a
+        // single-frame flash before the typewriter animation sets vertex colors.
+        // AnimateTypewriterFade will set alpha = 1 when it is ready to animate.
+        if (worldTitle != null) { worldTitle.text = title; worldTitle.gameObject.SetActive(true); worldTitle.alpha = 0f; }
+        if (worldSubtitle != null) { worldSubtitle.text = subtitle; worldSubtitle.gameObject.SetActive(true); worldSubtitle.alpha = 0f; }
+        if (worldValue != null) { worldValue.text = value; worldValue.gameObject.SetActive(true); worldValue.alpha = 0f; }
     }
 
     private void HideWorldTexts()
@@ -417,16 +490,100 @@ public class ChestRewardRevealController : MonoBehaviour
         RestoreTMPVertices(worldTitle);
         RestoreTMPVertices(worldSubtitle);
         RestoreTMPVertices(worldValue);
-        if (worldTitle    != null) worldTitle.gameObject.SetActive(false);
+        if (worldTitle != null) worldTitle.gameObject.SetActive(false);
         if (worldSubtitle != null) worldSubtitle.gameObject.SetActive(false);
-        if (worldValue    != null) worldValue.gameObject.SetActive(false);
+        if (worldValue != null) worldValue.gameObject.SetActive(false);
     }
 
     private void HideProgress()
     {
+        DLog("HideProgress ENTRY");
         KillSegmentTweens();
+        DOTween.Kill("BarPartBounce"); // kill bounce-in if running
         ResetBarSegments();
-        if (progressRoot != null) progressRoot.SetActive(false);
+        if (progressRoot != null) { progressRoot.SetActive(false); DLog($"HideProgress — progressRoot deactivated"); }
+    }
+
+    /// <summary>
+    /// Activates BarPart (progressRoot) with a bounce-in scale animation.
+    /// BG segments are shown fully opaque; all fill segments stay hidden.
+    /// Called at the start of card reveal so the bar appears while text animates.
+    /// </summary>
+    private void BounceInBarPart()
+    {
+        if (progressRoot == null) { DWarn("BounceInBarPart: progressRoot is NULL, aborting"); return; }
+
+        if (_isBouncingBar) DWarn("BounceInBarPart called while PREVIOUS BOUNCE is still running!");
+        _isBouncingBar = true;
+
+        DLog($"BounceInBarPart ENTRY — progressRoot.active={progressRoot.activeSelf}");
+
+        // Kill any previous bounce / segment tweens
+        DOTween.Kill("BarPartBounce");
+        KillSegmentTweens();
+
+        // Activate with scale 0
+        Transform root = progressRoot.transform;
+        Vector3 originalScale = root.localScale;
+        DLog($"BounceInBarPart — captured originalScale={originalScale}");
+        // Ensure we have a valid target (don't tween TO zero)
+        if (originalScale == Vector3.zero) { originalScale = Vector3.one; DLog("BounceInBarPart — originalScale was Zero, using Vector3.one"); }
+        root.localScale = Vector3.zero;
+        progressRoot.SetActive(true);
+        DLog($"BounceInBarPart — set progressRoot active=true, scale=Zero");
+
+        // BG segments: enabled + fully opaque
+        int bgCount = 0;
+        if (bgSegments != null)
+        {
+            for (int i = 0; i < bgSegments.Length; i++)
+            {
+                if (bgSegments[i] != null)
+                {
+                    bgSegments[i].enabled = true;
+                    SetSRAlpha(bgSegments[i], 1f);
+                    bgCount++;
+                }
+            }
+        }
+        DLog($"BounceInBarPart — BG segments enabled: {bgCount}/{(bgSegments?.Length ?? 0)}");
+
+        // Deactivate the entire Bar_Fill GameObject so none of its children render
+        if (barFillParent != null)
+        {
+            barFillParent.gameObject.SetActive(false);
+            DLog($"BounceInBarPart — barFillParent.SetActive(false), was active={!barFillParent.gameObject.activeSelf}");
+        }
+        else
+        {
+            DWarn("BounceInBarPart — barFillParent is NULL, cannot hide fills!");
+        }
+
+        // Verify fill segment states
+        int fillHiddenCount = 0;
+        if (fillSegments != null)
+        {
+            for (int i = 0; i < fillSegments.Length; i++)
+            {
+                if (fillSegments[i] != null && !fillSegments[i].enabled)
+                    fillHiddenCount++;
+            }
+        }
+        DLog($"BounceInBarPart — fill segments hidden: {fillHiddenCount}/{(fillSegments?.Length ?? 0)}");
+
+        // Text labels: set now so they're visible when bar bounces in
+        if (progressLevelText != null) progressLevelText.gameObject.SetActive(true);
+        if (progressCopiesText != null) progressCopiesText.gameObject.SetActive(true);
+
+        // Bounce scale 0 → original
+        Vector3 targetScale = originalScale;
+        DLog($"BounceInBarPart — starting DOScale tween: 0→{targetScale} over {barBounceInDuration}s");
+        root.DOScale(targetScale, barBounceInDuration)
+            .SetEase(Ease.OutBack, 1.2f)
+            .SetUpdate(true)
+            .SetId("BarPartBounce")
+            .SetLink(progressRoot, LinkBehaviour.KillOnDestroy)
+            .OnComplete(() => { _isBouncingBar = false; DLog($"BounceInBarPart TWEEN COMPLETE — finalScale={root.localScale}"); });
     }
 
     /// <summary>
@@ -523,16 +680,21 @@ public class ChestRewardRevealController : MonoBehaviour
     ///    fills bar to 8, briefly resets, then fills 0→postFilled.
     /// On kill/complete, segments end in correct final state.
     /// </summary>
-    private void ShowProgressAnimated(int preOwned, int postOwned, int level, int needed, float fill01)
+    private void ShowProgressAnimated(int preOwned, int postOwned, int level, int needed, float fill01, bool skipBarIntro = false)
     {
-        if (progressRoot == null) return;
+        DLog($"ShowProgressAnimated ENTRY — preOwned={preOwned} postOwned={postOwned} level={level} needed={needed} fill01={fill01:F3} skipBarIntro={skipBarIntro}");
+        if (_isShowingProgress) DWarn("ShowProgressAnimated called while PREVIOUS PROGRESS ANIM is still running!");
+        _isShowingProgress = true;
+
+        if (progressRoot == null) { DWarn("ShowProgressAnimated: progressRoot is NULL, aborting"); _isShowingProgress = false; return; }
+        DLog($"ShowProgressAnimated — progressRoot.active={progressRoot.activeSelf} localScale={progressRoot.transform.localScale}");
         progressRoot.SetActive(true);
 
         // Kill any previous segment tweens first
         KillSegmentTweens();
 
         int maxSeg = CardDropTuning.SegmentsPerUpgrade;
-        int preFilled  = Mathf.Clamp(preOwned,  0, maxSeg);
+        int preFilled = Mathf.Clamp(preOwned, 0, maxSeg);
         int postFilled = Mathf.Clamp(postOwned, 0, maxSeg);
 
         // ── Text labels (show post-reward counts) ──
@@ -554,18 +716,25 @@ public class ChestRewardRevealController : MonoBehaviour
         int copiesGained = (_rewards != null) ? _rewards.cardCopies : 0;
         bool isOverflow = (copiesGained > 0 && postFilled <= preFilled);
 
-        // ── Initial state: BG alpha 0 (will fade in), all fill disabled ──
-        if (bgSegments != null)
+        // ── Safely re-enable Bar_Fill parent ──
+        // IMPORTANT: Bar_Fill may contain non-segment renderable children (e.g. Bar_BG_Image).
+        // We must disable ALL renderers BEFORE activating the parent GO to prevent a flash.
+        if (barFillParent != null)
         {
-            for (int i = 0; i < bgSegments.Length; i++)
-            {
-                if (bgSegments[i] != null)
-                {
-                    bgSegments[i].enabled = true;
-                    SetSRAlpha(bgSegments[i], 0f);
-                }
-            }
+            // 1) While still inactive, disable every Renderer under barFillParent
+            int disabledCount = DisableAllFillRenderers();
+            DLog($"ShowProgressAnimated — disabled {disabledCount} renderers under barFillParent (while still inactive)");
+
+            // 2) Now safe to activate — nothing will render
+            barFillParent.gameObject.SetActive(true);
+            DLog($"ShowProgressAnimated — barFillParent.SetActive(true) (all renderers pre-disabled)");
         }
+        else
+        {
+            DWarn("ShowProgressAnimated — barFillParent is NULL!");
+        }
+
+        // ── Initial state: all fill segments disabled + reset scale ──
         for (int i = 0; i < segLen; i++)
         {
             if (fillSegments[i] == null) continue;
@@ -573,6 +742,7 @@ public class ChestRewardRevealController : MonoBehaviour
             SetSRAlpha(fillSegments[i], 0f);
             fillSegments[i].transform.localScale = GetSegmentBaseScale(i);
         }
+        DLog($"ShowProgressAnimated — all {segLen} fill segments disabled");
 
         int capturedPost = postFilled;
 
@@ -581,21 +751,42 @@ public class ChestRewardRevealController : MonoBehaviour
             .SetUpdate(true)
             .SetLink(gameObject, LinkBehaviour.KillOnDestroy);
 
-        // ── Phase 1: BG fade-in (all segments simultaneously) ──
-        if (bgSegments != null)
+        float fillCursor;
+
+        if (skipBarIntro)
         {
-            for (int i = 0; i < bgSegments.Length; i++)
+            // Bar is already visible from BounceInBarPart — BG fully opaque, skip fade-in
+            EnsureBGVisible();
+            fillCursor = 0.06f; // small gap then start fill
+            DLog("ShowProgressAnimated — skipBarIntro=true, BG ensured visible, fillCursor=0.06");
+        }
+        else
+        {
+            // ── Phase 1: BG alpha 0, fade in ──
+            if (bgSegments != null)
             {
-                if (bgSegments[i] == null) continue;
-                SpriteRenderer bg = bgSegments[i];
-                seq.Insert(0f,
-                    DOTween.To(() => bg.color.a, a => SetSRAlpha(bg, a), 1f, bgFadeInDuration)
-                        .SetEase(Ease.OutQuad));
+                for (int i = 0; i < bgSegments.Length; i++)
+                {
+                    if (bgSegments[i] != null)
+                    {
+                        bgSegments[i].enabled = true;
+                        SetSRAlpha(bgSegments[i], 0f);
+                    }
+                }
+                for (int i = 0; i < bgSegments.Length; i++)
+                {
+                    if (bgSegments[i] == null) continue;
+                    SpriteRenderer bg = bgSegments[i];
+                    seq.Insert(0f,
+                        DOTween.To(() => bg.color.a, a => SetSRAlpha(bg, a), 1f, bgFadeInDuration)
+                            .SetEase(Ease.OutQuad));
+                }
             }
+            fillCursor = bgFadeInDuration + 0.06f;
+            DLog($"ShowProgressAnimated — skipBarIntro=false, BG fading in over {bgFadeInDuration}s, fillCursor={fillCursor:F3}");
         }
 
-        // Small gap after BG is visible before fill starts
-        float fillCursor = bgFadeInDuration + 0.06f;
+        DLog($"ShowProgressAnimated — preFilled={preFilled} postFilled={postFilled} isOverflow={isOverflow} fillCursor={fillCursor:F3}");
 
         // ── Phase 2a: Show pre-existing filled segments instantly ──
         int capPre = preFilled;
@@ -662,11 +853,13 @@ public class ChestRewardRevealController : MonoBehaviour
         }
 
         // On kill or complete: snap to correct final state
-        seq.OnKill(() => { EnsureBGVisible(); SnapFillSegments(capturedPost); });
+        seq.OnKill(() => { _isShowingProgress = false; DLog($"ShowProgressAnimated SEQ ONKILL — snapping to {capturedPost}"); EnsureBGVisible(); SnapFillSegments(capturedPost); });
         seq.OnComplete(() =>
         {
+            _isShowingProgress = false;
             EnsureBGVisible();
             SnapFillSegments(capturedPost);
+            DLog($"ShowProgressAnimated SEQ COMPLETE — pre={preFilled} post={capturedPost} overflow={isOverflow}");
             Debug.Log($"[RewardReveal] Progress fill done: pre={preFilled} post={capturedPost} overflow={isOverflow}");
         });
     }
@@ -710,6 +903,7 @@ public class ChestRewardRevealController : MonoBehaviour
     private void SnapFillSegments(int targetFilled)
     {
         if (fillSegments == null) return;
+        DLog($"SnapFillSegments — targetFilled={targetFilled} total={fillSegments.Length}");
         for (int i = 0; i < fillSegments.Length; i++)
         {
             if (fillSegments[i] == null) continue;
@@ -735,6 +929,30 @@ public class ChestRewardRevealController : MonoBehaviour
                 SetSRAlpha(bgSegments[i], 1f);
             }
         }
+    }
+
+    /// <summary>
+    /// Disables EVERY Renderer component found under barFillParent (including
+    /// non-segment decorative children like Bar_BG_Image objects).  This is safe
+    /// to call while barFillParent.gameObject is still inactive — GetComponentsInChildren
+    /// with includeInactive=true will still find them.
+    /// Returns the number of renderers that were disabled.
+    /// </summary>
+    private int DisableAllFillRenderers()
+    {
+        if (barFillParent == null) return 0;
+
+        Renderer[] all = barFillParent.GetComponentsInChildren<Renderer>(true);
+        int count = 0;
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (all[i] != null)
+            {
+                all[i].enabled = false;
+                count++;
+            }
+        }
+        return count;
     }
 
     /// <summary>Returns true if fillSegments is usable, logs warning if not.</summary>
@@ -765,11 +983,25 @@ public class ChestRewardRevealController : MonoBehaviour
     {
         KillPerCharTweens();
 
+        if (_isFadingTexts) DWarn("FadeInWorldTexts called while PREVIOUS TEXT FADE is still running!");
+        _isFadingTexts = true;
+
+        DLog("FadeInWorldTexts ENTRY — starting Title typewriter");
         // Chain: title → subtitle → value → done
         AnimateTypewriterFade(worldTitle, charTypewriterFadeDuration, charTypewriterStagger, () =>
+        {
+            DLog("FadeInWorldTexts — Title DONE, starting Subtitle typewriter");
             AnimateTypewriterFade(worldSubtitle, charTypewriterFadeDuration, charTypewriterStagger, () =>
+            {
+                DLog("FadeInWorldTexts — Subtitle DONE, starting Value typewriter");
                 AnimateTypewriterFade(worldValue, charTypewriterFadeDuration, charTypewriterStagger, () =>
-                    onComplete?.Invoke())));
+                {
+                    _isFadingTexts = false;
+                    DLog("FadeInWorldTexts — Value DONE, entire chain COMPLETE");
+                    onComplete?.Invoke();
+                });
+            });
+        });
     }
 
     /// <summary>
@@ -794,9 +1026,12 @@ public class ChestRewardRevealController : MonoBehaviour
     {
         if (tmp == null || !tmp.gameObject.activeSelf || string.IsNullOrEmpty(tmp.text))
         {
+            DLog($"AnimateTypewriterFade — SKIP (null/inactive/empty) label={tmp?.name}");
             onComplete?.Invoke();
             return;
         }
+
+        DLog($"AnimateTypewriterFade — label={tmp.name} text='{tmp.text}' fadeDuration={fadeDuration} stagger={stagger}");
 
         // Kill any previous per-char tween on this label and restore clean mesh
         DOTween.Kill(tmp.GetInstanceID());
@@ -875,6 +1110,7 @@ public class ChestRewardRevealController : MonoBehaviour
             })
             .OnComplete(() =>
             {
+                DLog($"AnimateTypewriterFade COMPLETE — label={tmp?.name}");
                 // Restore clean vertex colors so future text changes aren't corrupted
                 if (tmp != null && tmp.gameObject.activeSelf)
                     tmp.ForceMeshUpdate();

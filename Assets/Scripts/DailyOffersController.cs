@@ -421,10 +421,17 @@ public class DailyOffersController : MonoBehaviour
         string progressTxt = card.GetUpgradeProgressText();
         slot.SetProgress(progress, progressTxt);
 
-        // Available / bought (no max-level state)
+        // DAILY OFFERS: countdown + slot gating (UI only)
+        // If the card is not yet owned/unlocked, lock the slot visually and disable purchase.
+        bool cardOwned = card.IsUnlocked;
+
         if (bought)
         {
             slot.SetPurchased("PURCHASED");
+        }
+        else if (!cardOwned)
+        {
+            slot.SetLocked("LOCKED");
         }
         else
         {

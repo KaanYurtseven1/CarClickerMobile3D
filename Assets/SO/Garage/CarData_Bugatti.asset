@@ -1,0 +1,122 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8e7010a9a4586f2468b2626d3033be76, type: 3}
+  m_Name: CarData_Bugatti
+  m_EditorClassIdentifier: Assembly-CSharp::CarDataSO
+  carId: Bugatti
+  carRootName: Bugatti
+  displayCarName: JMP-BUGATTI
+  displayModelName: CHIRON
+  baseMaterialTemplate: {fileID: -5287993169948570957, guid: 1cbc6d4b412e75b469e82b8a77fbfe71, type: 3}
+  colors:
+  - label: Default_Mavi
+    hexColor: '#4EA0F0'
+  - label: Mor
+    hexColor: '#27105A'
+  - label: Pembe
+    hexColor: '#EE7CF6'
+  - label: Siyah
+    hexColor: '#150101'
+  - label: Turuncu
+    hexColor: '#B65E1B'
+  - label: Yesil
+    hexColor: '#689D47'
+  colorFolders:
+  - {fileID: 102900000, guid: 743bf74181f03d1478ea583ec3de6246, type: 3}
+  - {fileID: 102900000, guid: a4ccfc892533550418e8b7ab61b4cd90, type: 3}
+  - {fileID: 102900000, guid: 4f10715573b8c4b429f2bfff7567e9b1, type: 3}
+  - {fileID: 102900000, guid: cab3de30d9adb9b42aa1f67906ec45c8, type: 3}
+  - {fileID: 102900000, guid: 2ba5057d9390eee488c7a7a0e8bc80a3, type: 3}
+  - {fileID: 102900000, guid: e07b41cf0a4efd445ae02ce64527db53, type: 3}
+  stickerKeys:
+  - 
+  - 26
+  - 77
+  - Alev
+  - Leo
+  - "Y\u0131ld\u0131z"
+  autoDiscoverStickerKeys: 1
+  partOptions:
+  - partKey: Camurluk_1
+    icon: {fileID: 21300000, guid: 448e3d8d053ed064c8c8bc274180cc7c, type: 3}
+  - partKey: Camurluk_2
+    icon: {fileID: 21300000, guid: 6fe5ba857025f164895a055e75b9e6e2, type: 3}
+  - partKey: Camurluk_3
+    icon: {fileID: 21300000, guid: 67cf13cf985415844a086b5c690f0999, type: 3}
+  - partKey: Egzoz_1
+    icon: {fileID: 21300000, guid: ce5921dfb0a5379428fddeac065f05a6, type: 3}
+  - partKey: Egzoz_2
+    icon: {fileID: 21300000, guid: 64437c57efde2e5448308f485a5bc6ae, type: 3}
+  - partKey: Egzoz_3
+    icon: {fileID: 21300000, guid: abff28a557cffc54a81db0c4053ea81f, type: 3}
+  - partKey: Kaput_1
+    icon: {fileID: 21300000, guid: d85cc7a6c84bbac49a0b628af567721a, type: 3}
+  - partKey: Kaput_2
+    icon: {fileID: 21300000, guid: ec9b4763d3adc454b8226eadfd1f8ee4, type: 3}
+  - partKey: Kaput_3
+    icon: {fileID: 21300000, guid: efb925b8d2e4db44d968f6b98800d071, type: 3}
+  - partKey: Kaput_4
+    icon: {fileID: 21300000, guid: 3686f3ebaa223774ebf12f9011df2e3d, type: 3}
+  - partKey: Kaput_5
+    icon: {fileID: 21300000, guid: 05fdb7e8f63fe7f43be61995a16118b5, type: 3}
+  - partKey: Kaput_6
+    icon: {fileID: 21300000, guid: 08c2584ebeda5c846869c8724991145f, type: 3}
+  - partKey: Kaput_7
+    icon: {fileID: 21300000, guid: 3aacf966a5e350542aa14b51ac95cdc6, type: 3}
+  - partKey: Spoiler_1
+    icon: {fileID: 21300000, guid: 67666d37209a30a4bbbee9b8010590cf, type: 3}
+  - partKey: Spoiler_2
+    icon: {fileID: 21300000, guid: 15baf475825751149a2157dd9981ebf8, type: 3}
+  - partKey: Spoiler_3
+    icon: {fileID: 21300000, guid: ee7567b738d63874dbb58aaca769bda5, type: 3}
+  - partKey: Spoiler_4
+    icon: {fileID: 21300000, guid: 147e762fc81c4db4e87ebcef38b96fc1, type: 3}
+  - partKey: Spoiler_5
+    icon: {fileID: 21300000, guid: c1914c88003f44b458ec210cf696b46b, type: 3}
+  generatedMaterialsFlat:
+  - {fileID: 2100000, guid: 1a3019925fd91ee4ca87d89d84b94456, type: 2}
+  - {fileID: 2100000, guid: e2822c17410e12d4b81210638851c818, type: 2}
+  - {fileID: 2100000, guid: 2cd7a892277cc644c88df76f114a6218, type: 2}
+  - {fileID: 2100000, guid: 5e79602f0b2009443b21aac78672b33b, type: 2}
+  - {fileID: 2100000, guid: d61652fd05213544d9732ce115793c9f, type: 2}
+  - {fileID: 2100000, guid: abec88ec44b02694a940ddc566561691, type: 2}
+  - {fileID: 2100000, guid: 6292f587660ff6945aeedd6d29eb744d, type: 2}
+  - {fileID: 2100000, guid: bbc11435de0e3a148b1dbff21847b3c6, type: 2}
+  - {fileID: 2100000, guid: 7dde30473f2310047b29b401a2a2efaf, type: 2}
+  - {fileID: 2100000, guid: c770edbb8af13e04284ebb30aaf4a6ff, type: 2}
+  - {fileID: 2100000, guid: 0309a2b44d0dc9547960f327a2902861, type: 2}
+  - {fileID: 2100000, guid: 37f8f9f31c16e5b4e8faf76fdc0ba561, type: 2}
+  - {fileID: 2100000, guid: 4c7f0d4d9fbeb3c47a8cc5be7d42ed20, type: 2}
+  - {fileID: 2100000, guid: 755d8cd1031e159458f3fc7cf4931d26, type: 2}
+  - {fileID: 2100000, guid: 7bef75d3bf2feda4fa5278a69e97ccc8, type: 2}
+  - {fileID: 2100000, guid: d0edec43297330a4bab7d1a37c33ff8b, type: 2}
+  - {fileID: 2100000, guid: e5ab418c3a3b6d248a51b0c4b0204814, type: 2}
+  - {fileID: 2100000, guid: 8dfca2646801cb44fa2e74f8e3a9f8a6, type: 2}
+  - {fileID: 2100000, guid: 65367bacd8e0be74f8df2cb8da201857, type: 2}
+  - {fileID: 2100000, guid: 2616bef84bca7ba438310bfd6c16a624, type: 2}
+  - {fileID: 2100000, guid: 2dda6d9613f78694c9be182a2d4e6c35, type: 2}
+  - {fileID: 2100000, guid: 92ea228a3e9589749845d9202624af37, type: 2}
+  - {fileID: 2100000, guid: e93d3534d929c5242865480690cf108b, type: 2}
+  - {fileID: 2100000, guid: ff677561c3d0edd49a99476a24952626, type: 2}
+  - {fileID: 2100000, guid: cad8f979e6b797143b6f4a9ffc013110, type: 2}
+  - {fileID: 2100000, guid: 30e6841e87b0f434a9190323c2b16add, type: 2}
+  - {fileID: 2100000, guid: 161c69c931ef02b4a9f9c698af0105fe, type: 2}
+  - {fileID: 2100000, guid: 574d77d177c2fa74c849f9a8f6a3480f, type: 2}
+  - {fileID: 2100000, guid: a8c55a5ec031f7343a90104eb77bb593, type: 2}
+  - {fileID: 2100000, guid: e65132e10d6265a4b99f9a8aa077c576, type: 2}
+  - {fileID: 2100000, guid: a300b23dc9aa3364c95d126ec2584b43, type: 2}
+  - {fileID: 2100000, guid: 77329fb358cdb7947accf5733fa36992, type: 2}
+  - {fileID: 2100000, guid: 404eb06c2620c394ab6c36d7ca9867aa, type: 2}
+  - {fileID: 2100000, guid: 8a5f039520aa50942bf74f00fa3fb8a3, type: 2}
+  - {fileID: 2100000, guid: e27b7fc67d03fd2439fb88c958757738, type: 2}
+  - {fileID: 2100000, guid: 394907d7d357db242bbc773d06e2683c, type: 2}
+  outputMaterialFolder: {fileID: 0}

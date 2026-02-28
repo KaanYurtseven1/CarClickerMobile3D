@@ -16,6 +16,9 @@ MonoBehaviour:
   carRootName: Bmw
   displayCarName: JMP-BMW
   displayModelName: M4
+  baseDurability: 7
+  baseAcceleration: 7
+  baseSpeed: 6
   baseMaterialTemplate: {fileID: -7740765349366440714, guid: e91b44118c07bb145889b57212ff2ec5, type: 3}
   colors:
   - label: "Default_Sar\u0131"

@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using DG.Tweening;
 
 public class GarageController : MonoBehaviour
 {
@@ -43,8 +44,18 @@ public class GarageController : MonoBehaviour
     [SerializeField] private PartsUIController partsUI;
     [SerializeField] private BarsUIController barsUI;
 
+    // ─── Glitch Transition Settings (inspector-tunable) ───
+    [Header("─── Glitch Transition ───")]
+    [SerializeField] private float glitchOutDur = 0.22f;
+    [SerializeField] private float glitchInDur = 0.18f;
+    [SerializeField] private float jitterX = 0.06f;
+    [SerializeField] private float jitterRot = 3f;
+    [SerializeField] private float punch = 0.06f;
+    [SerializeField] private Ease glitchEase = Ease.OutQuad;
+
     // ─────────────────── Internal State ───────────────────
     private int _currentCarIndex;
+    private bool _isTransitioning;
     private Transform[] _carRoots;
     private CarCustomizer[] _customizers;
     private CarState[] _states;
@@ -163,14 +174,148 @@ public class GarageController : MonoBehaviour
 
     private void GoLeft()
     {
+        if (_isTransitioning) return;
         if (_currentCarIndex > 0)
-            SelectCar(_currentCarIndex - 1);
+            PlayGlitchTransition(_currentCarIndex - 1);
     }
 
     private void GoRight()
     {
+        if (_isTransitioning) return;
         if (_currentCarIndex < CarCount - 1)
-            SelectCar(_currentCarIndex + 1);
+            PlayGlitchTransition(_currentCarIndex + 1);
+    }
+
+    // ══════════════════ Glitch Transition (visual-only) ══════════════════
+
+    /// <summary>
+    /// Plays a short DOTween "glitch" animation on the current car root,
+    /// then calls SelectCar(targetIndex), then plays a "glitch-in" on the
+    /// new car root.  No gameplay logic is altered.
+    /// </summary>
+    private void PlayGlitchTransition(int targetIndex)
+    {
+        Transform currentRoot = _carRoots[_currentCarIndex];
+        if (currentRoot == null)
+        {
+            // Fallback: no root to animate, just switch immediately
+            SelectCar(targetIndex);
+            return;
+        }
+
+        _isTransitioning = true;
+
+        // Disable nav buttons while transitioning
+        if (goLeftButton != null) goLeftButton.interactable = false;
+        if (goRightButton != null) goRightButton.interactable = false;
+
+        // Cache originals for the outgoing car
+        Vector3 origPos = currentRoot.localPosition;
+        Quaternion origRot = currentRoot.localRotation;
+        Vector3 origScale = currentRoot.localScale;
+
+        // Kill any leftover tweens on this transform
+        DOTween.Kill(currentRoot);
+
+        // ── GlitchOut sequence ──
+        float stepOut = glitchOutDur / 5f;
+        Sequence outSeq = DOTween.Sequence().SetTarget(currentRoot).SetUpdate(true);
+
+        // Position X jitter
+        outSeq.Append(currentRoot.DOLocalMoveX(origPos.x + jitterX, stepOut).SetEase(glitchEase));
+        outSeq.Append(currentRoot.DOLocalMoveX(origPos.x - jitterX * 0.8f, stepOut).SetEase(glitchEase));
+        outSeq.Append(currentRoot.DOLocalMoveX(origPos.x + jitterX * 0.6f, stepOut).SetEase(glitchEase));
+        outSeq.Append(currentRoot.DOLocalMoveX(origPos.x - jitterX * 0.4f, stepOut).SetEase(glitchEase));
+        outSeq.Append(currentRoot.DOLocalMoveX(origPos.x, stepOut).SetEase(glitchEase));
+
+        // Rotation Z jitter (runs in parallel with position)
+        outSeq.Insert(0f, currentRoot.DOLocalRotate(new Vector3(0, 0, jitterRot), stepOut, RotateMode.Fast).SetEase(glitchEase));
+        outSeq.Insert(stepOut, currentRoot.DOLocalRotate(new Vector3(0, 0, -jitterRot * 0.7f), stepOut, RotateMode.Fast).SetEase(glitchEase));
+        outSeq.Insert(stepOut * 2, currentRoot.DOLocalRotate(new Vector3(0, 0, jitterRot * 0.5f), stepOut, RotateMode.Fast).SetEase(glitchEase));
+        outSeq.Insert(stepOut * 3, currentRoot.DOLocalRotate(origRot.eulerAngles, stepOut * 2, RotateMode.Fast).SetEase(glitchEase));
+
+        // Scale punch (runs in parallel)
+        outSeq.Insert(0f, currentRoot.DOScale(origScale * (1f + punch), glitchOutDur * 0.35f).SetEase(glitchEase));
+        outSeq.Insert(glitchOutDur * 0.35f, currentRoot.DOScale(origScale * (1f - punch), glitchOutDur * 0.3f).SetEase(glitchEase));
+        outSeq.Insert(glitchOutDur * 0.65f, currentRoot.DOScale(origScale, glitchOutDur * 0.35f).SetEase(glitchEase));
+
+        outSeq.OnComplete(() =>
+        {
+            // Guarantee exact restoration before deactivation
+            currentRoot.localPosition = origPos;
+            currentRoot.localRotation = origRot;
+            currentRoot.localScale = origScale;
+
+            // ── Actual car switch (the only call) ──
+            SelectCar(targetIndex);
+
+            // ── GlitchIn on the new car ──
+            Transform nextRoot = _carRoots[_currentCarIndex];
+            if (nextRoot != null)
+            {
+                PlayGlitchIn(nextRoot);
+            }
+            else
+            {
+                FinishTransition();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Short "glitch-in" pop animation on the newly activated car root.
+    /// Restores exact transform values at the end.
+    /// </summary>
+    private void PlayGlitchIn(Transform root)
+    {
+        Vector3 origPos = root.localPosition;
+        Quaternion origRot = root.localRotation;
+        Vector3 origScale = root.localScale;
+
+        DOTween.Kill(root);
+
+        float stepIn = glitchInDur / 4f;
+        float halfPunch = punch * 0.5f;
+
+        // Start slightly small
+        root.localScale = origScale * (1f - halfPunch);
+
+        Sequence inSeq = DOTween.Sequence().SetTarget(root).SetUpdate(true);
+
+        // Scale pop
+        inSeq.Append(root.DOScale(origScale * (1f + halfPunch), stepIn * 2f).SetEase(Ease.OutBack));
+        inSeq.Append(root.DOScale(origScale, stepIn * 2f).SetEase(glitchEase));
+
+        // Light X jitter
+        float halfJitterX = jitterX * 0.4f;
+        inSeq.Insert(0f, root.DOLocalMoveX(origPos.x + halfJitterX, stepIn).SetEase(glitchEase));
+        inSeq.Insert(stepIn, root.DOLocalMoveX(origPos.x - halfJitterX * 0.6f, stepIn).SetEase(glitchEase));
+        inSeq.Insert(stepIn * 2, root.DOLocalMoveX(origPos.x, stepIn * 2f).SetEase(glitchEase));
+
+        // Light rotation jitter
+        float halfJitterRot = jitterRot * 0.4f;
+        inSeq.Insert(0f, root.DOLocalRotate(new Vector3(0, 0, halfJitterRot), stepIn, RotateMode.Fast).SetEase(glitchEase));
+        inSeq.Insert(stepIn, root.DOLocalRotate(origRot.eulerAngles, stepIn * 2f, RotateMode.Fast).SetEase(glitchEase));
+
+        inSeq.OnComplete(() =>
+        {
+            // Guarantee exact restoration
+            root.localPosition = origPos;
+            root.localRotation = origRot;
+            root.localScale = origScale;
+
+            FinishTransition();
+        });
+    }
+
+    /// <summary>Clears transition lock and re-applies correct button interactable states.</summary>
+    private void FinishTransition()
+    {
+        _isTransitioning = false;
+
+        // Re-apply proper interactable state (mirrors RefreshAllUI logic)
+        if (goLeftButton != null) goLeftButton.interactable = _currentCarIndex > 0;
+        if (goRightButton != null) goRightButton.interactable = _currentCarIndex < CarCount - 1;
     }
 
     // ══════════════════ State Application ══════════════════
@@ -295,18 +440,19 @@ public class GarageController : MonoBehaviour
             if (partsUI != null) partsUI.UpdatePartHighlight(partKey, true);
         }
 
-        RefreshBars();
+        RefreshBars(animate: false);
     }
 
     // ══════════════════ Stats / Bars ══════════════════
 
-    /// <summary>Recomputes stats from base + equipped parts and updates the bars UI.</summary>
-    private void RefreshBars()
+    /// <summary>Recomputes stats from base + equipped parts and updates the bars UI.
+    /// When <paramref name="animate"/> is false the bars snap instantly (used by TogglePart).</summary>
+    private void RefreshBars(bool animate = true)
     {
         if (barsUI == null) return;
 
         ComputeStats(out int dur, out int acc, out int spd);
-        barsUI.Refresh(dur, acc, spd);
+        barsUI.Refresh(dur, acc, spd, animate);
     }
 
     /// <summary>

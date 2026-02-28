@@ -689,6 +689,7 @@ GameObject:
   - component: {fileID: 124187953}
   - component: {fileID: 124187952}
   - component: {fileID: 124187951}
+  - component: {fileID: 124187954}
   m_Layer: 5
   m_Name: ColorChoose_Button (5)
   m_TagString: Untagged
@@ -711,9 +712,9 @@ RectTransform:
   - {fileID: 1969882835}
   m_Father: {fileID: 1436989222}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 60, y: 90}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 85, y: 125}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &124187951
@@ -798,6 +799,26 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 124187949}
   m_CullTransparentMesh: 1
+--- !u!114 &124187954
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 124187949}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement
+  m_IgnoreLayout: 0
+  m_MinWidth: -1
+  m_MinHeight: -1
+  m_PreferredWidth: 85
+  m_PreferredHeight: 125
+  m_FlexibleWidth: 0
+  m_FlexibleHeight: 0
+  m_LayoutPriority: 1
 --- !u!1 &127770295
 GameObject:
   m_ObjectHideFlags: 0
@@ -1611,6 +1632,63 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 232295388}
   m_CullTransparentMesh: 1
+--- !u!1 &246381848
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 246381850}
+  - component: {fileID: 246381849}
+  m_Layer: 0
+  m_Name: FocusController
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &246381849
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 246381848}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cd6e0a08ed7dd094298f614639192206, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GarageFocusController
+  mainCamera: {fileID: 973605531}
+  canvasGroup: {fileID: 1004046109}
+  carPlatform: {fileID: 1535067364}
+  platformCollider: {fileID: 1535067365}
+  doubleClickThreshold: 0.3
+  focusCameraRotX: 7
+  focusCameraZ: -9.3
+  enterDuration: 0.4
+  exitDuration: 0.4
+  canvasFadeDuration: 0.25
+  tweenEase: 10
+  fadeEase: 1
+  dragSensitivity: 0.2
+--- !u!4 &246381850
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 246381848}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &265059660
 GameObject:
   m_ObjectHideFlags: 0
@@ -1990,6 +2068,7 @@ GameObject:
   - component: {fileID: 329522558}
   - component: {fileID: 329522557}
   - component: {fileID: 329522556}
+  - component: {fileID: 329522559}
   m_Layer: 5
   m_Name: ColorChoose_Button
   m_TagString: Untagged
@@ -2012,9 +2091,9 @@ RectTransform:
   - {fileID: 1629517894}
   m_Father: {fileID: 1436989222}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -440, y: 90}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 85, y: 125}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &329522556
@@ -2099,6 +2178,26 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 329522554}
   m_CullTransparentMesh: 1
+--- !u!114 &329522559
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 329522554}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement
+  m_IgnoreLayout: 0
+  m_MinWidth: -1
+  m_MinHeight: -1
+  m_PreferredWidth: 85
+  m_PreferredHeight: 125
+  m_FlexibleWidth: 0
+  m_FlexibleHeight: 0
+  m_LayoutPriority: 1
 --- !u!1 &337408788
 GameObject:
   m_ObjectHideFlags: 0
@@ -3816,6 +3915,7 @@ GameObject:
   - component: {fileID: 558305385}
   - component: {fileID: 558305384}
   - component: {fileID: 558305383}
+  - component: {fileID: 558305386}
   m_Layer: 5
   m_Name: ColorChoose_Button (3)
   m_TagString: Untagged
@@ -3838,9 +3938,9 @@ RectTransform:
   - {fileID: 297287907}
   m_Father: {fileID: 1436989222}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -140, y: 90}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 85, y: 125}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &558305383
@@ -3925,6 +4025,26 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 558305381}
   m_CullTransparentMesh: 1
+--- !u!114 &558305386
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 558305381}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement
+  m_IgnoreLayout: 0
+  m_MinWidth: -1
+  m_MinHeight: -1
+  m_PreferredWidth: 85
+  m_PreferredHeight: 125
+  m_FlexibleWidth: 0
+  m_FlexibleHeight: 0
+  m_LayoutPriority: 1
 --- !u!1 &561054593
 GameObject:
   m_ObjectHideFlags: 0
@@ -4133,6 +4253,13 @@ MonoBehaviour:
   stickerUI: {fileID: 1756531624}
   colorUI: {fileID: 1756531623}
   partsUI: {fileID: 1756531622}
+  barsUI: {fileID: 1455613722}
+  glitchOutDur: 0.22
+  glitchInDur: 0.18
+  jitterX: 0.06
+  jitterRot: 3
+  punch: 0.06
+  glitchEase: 6
 --- !u!1 &596258708
 GameObject:
   m_ObjectHideFlags: 0
@@ -4145,6 +4272,7 @@ GameObject:
   - component: {fileID: 596258712}
   - component: {fileID: 596258711}
   - component: {fileID: 596258710}
+  - component: {fileID: 596258713}
   m_Layer: 5
   m_Name: ColorChoose_Button (2)
   m_TagString: Untagged
@@ -4167,9 +4295,9 @@ RectTransform:
   - {fileID: 462581797}
   m_Father: {fileID: 1436989222}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -240, y: 90}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 85, y: 125}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &596258710
@@ -4254,6 +4382,26 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 596258708}
   m_CullTransparentMesh: 1
+--- !u!114 &596258713
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 596258708}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement
+  m_IgnoreLayout: 0
+  m_MinWidth: -1
+  m_MinHeight: -1
+  m_PreferredWidth: 85
+  m_PreferredHeight: 125
+  m_FlexibleWidth: 0
+  m_FlexibleHeight: 0
+  m_LayoutPriority: 1
 --- !u!1 &597134684
 GameObject:
   m_ObjectHideFlags: 0
@@ -6296,6 +6444,7 @@ GameObject:
   - component: {fileID: 876715058}
   - component: {fileID: 876715057}
   - component: {fileID: 876715056}
+  - component: {fileID: 876715059}
   m_Layer: 5
   m_Name: ColorChoose_Button (4)
   m_TagString: Untagged
@@ -6318,9 +6467,9 @@ RectTransform:
   - {fileID: 448011107}
   m_Father: {fileID: 1436989222}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -40, y: 90}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 85, y: 125}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &876715056
@@ -6405,6 +6554,26 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 876715054}
   m_CullTransparentMesh: 1
+--- !u!114 &876715059
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 876715054}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement
+  m_IgnoreLayout: 0
+  m_MinWidth: -1
+  m_MinHeight: -1
+  m_PreferredWidth: 85
+  m_PreferredHeight: 125
+  m_FlexibleWidth: 0
+  m_FlexibleHeight: 0
+  m_LayoutPriority: 1
 --- !u!1 &876757610
 GameObject:
   m_ObjectHideFlags: 0
@@ -6682,7 +6851,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: 0.00054808444}
+  m_AnchoredPosition: {x: 2672, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &907195424
@@ -6698,12 +6867,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.HorizontalLayoutGroup
   m_Padding:
-    m_Left: -340
-    m_Right: 0
-    m_Top: 0
-    m_Bottom: 0
+    m_Left: 40
+    m_Right: 40
+    m_Top: 40
+    m_Bottom: 40
   m_ChildAlignment: 0
-  m_Spacing: 46.52
+  m_Spacing: 45
   m_ChildForceExpandWidth: 1
   m_ChildForceExpandHeight: 1
   m_ChildControlWidth: 0
@@ -7780,6 +7949,7 @@ GameObject:
   - component: {fileID: 1004046107}
   - component: {fileID: 1004046106}
   - component: {fileID: 1004046105}
+  - component: {fileID: 1004046109}
   m_Layer: 5
   m_Name: Canvas
   m_TagString: Untagged
@@ -7879,6 +8049,18 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
+--- !u!225 &1004046109
+CanvasGroup:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1004046104}
+  m_Enabled: 1
+  m_Alpha: 1
+  m_Interactable: 1
+  m_BlocksRaycasts: 1
+  m_IgnoreParentGroups: 0
 --- !u!1 &1044432523
 GameObject:
   m_ObjectHideFlags: 0
@@ -9126,7 +9308,7 @@ GameObject:
   - component: {fileID: 1188843897}
   - component: {fileID: 1188843896}
   m_Layer: 5
-  m_Name: Bar3
+  m_Name: Bar3_speed
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -10793,7 +10975,7 @@ GameObject:
   - component: {fileID: 1378097988}
   - component: {fileID: 1378097987}
   m_Layer: 5
-  m_Name: Bar1
+  m_Name: Bar1_durability
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -11273,6 +11455,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1436989222}
+  - component: {fileID: 1436989223}
   m_Layer: 5
   m_Name: ColorChooseButtons
   m_TagString: Untagged
@@ -11300,11 +11483,37 @@ RectTransform:
   - {fileID: 124187950}
   m_Father: {fileID: 1243303898}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 180, y: -184}
+  m_AnchorMin: {x: 0, y: 1}
+  m_AnchorMax: {x: 0, y: 1}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 100, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &1436989223
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1436989221}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 30649d3a9faa99c48a7b1166b86bf2a0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.HorizontalLayoutGroup
+  m_Padding:
+    m_Left: 69
+    m_Right: 0
+    m_Top: 120
+    m_Bottom: -150
+  m_ChildAlignment: 4
+  m_Spacing: 20
+  m_ChildForceExpandWidth: 0
+  m_ChildForceExpandHeight: 0
+  m_ChildControlWidth: 0
+  m_ChildControlHeight: 0
+  m_ChildScaleWidth: 0
+  m_ChildScaleHeight: 0
+  m_ReverseArrangement: 0
 --- !u!1 &1446498665
 GameObject:
   m_ObjectHideFlags: 0
@@ -11317,7 +11526,7 @@ GameObject:
   - component: {fileID: 1446498668}
   - component: {fileID: 1446498667}
   m_Layer: 5
-  m_Name: Bar2
+  m_Name: Bar2_acceleration
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -11406,6 +11615,7 @@ GameObject:
   - component: {fileID: 1455613719}
   - component: {fileID: 1455613721}
   - component: {fileID: 1455613720}
+  - component: {fileID: 1455613722}
   m_Layer: 5
   m_Name: Panel_CarUI
   m_TagString: Untagged
@@ -11473,6 +11683,21 @@ MonoBehaviour:
   m_ChildScaleWidth: 0
   m_ChildScaleHeight: 0
   m_ReverseArrangement: 0
+--- !u!114 &1455613722
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1455613718}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9ca16acbefbbb2840b674bf1c97298eb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BarsUIController
+  barsGroupParent: {fileID: 265059661}
+  startDelay: 0.05
+  stepDelay: 0.04
 --- !u!1 &1468697468
 GameObject:
   m_ObjectHideFlags: 0
@@ -12099,6 +12324,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1535067364}
+  - component: {fileID: 1535067365}
   m_Layer: 0
   m_Name: CarPlatform
   m_TagString: Untagged
@@ -12114,7 +12340,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1535067363}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.004681583, y: 0.9681954, z: -0.018167736, w: -0.24949102}
+  m_LocalRotation: {x: -0.0045387503, y: 0.97012496, z: -0.018203942, w: -0.24187918}
   m_LocalPosition: {x: 0, y: -0.85, z: -5.6}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -12122,7 +12348,30 @@ Transform:
   - {fileID: 1061575001}
   - {fileID: 2083343595}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 2.15, y: 208.9, z: 0}
+  m_LocalEulerAnglesHint: {x: 2.15, y: 208, z: 0}
+--- !u!136 &1535067365
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1535067363}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 1.0166202
+  m_Height: 2.033241
+  m_Direction: 1
+  m_Center: {x: 0.0110709695, y: 0.9278493, z: 9.896661e-11}
 --- !u!1001 &1553656216
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -13274,6 +13523,8 @@ MonoBehaviour:
   colorButtonsParent: {fileID: 1436989222}
   selectedScale: 1.25
   normalScale: 1
+  tweenDuration: 0.22
+  tweenEase: 27
 --- !u!114 &1756531624
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -13288,6 +13539,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::StickerUIController
   arabaStickerOn: {fileID: 392961355}
   stickerSlotsParent: {fileID: 414643943}
+  moveDuration: 0.25
+  moveEase: 9
+  emphasisDuration: 0.25
+  emphasisEase: 27
+  selectedX: -60
+  unselectedX: 35
+  selectedScale: 1.3
+  unselectedScale: 1
 --- !u!1 &1765484054
 GameObject:
   m_ObjectHideFlags: 0
@@ -13300,6 +13559,7 @@ GameObject:
   - component: {fileID: 1765484058}
   - component: {fileID: 1765484057}
   - component: {fileID: 1765484056}
+  - component: {fileID: 1765484059}
   m_Layer: 5
   m_Name: ColorChoose_Button (1)
   m_TagString: Untagged
@@ -13322,9 +13582,9 @@ RectTransform:
   - {fileID: 1894171736}
   m_Father: {fileID: 1436989222}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -340, y: 90}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 85, y: 125}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1765484056
@@ -13409,6 +13669,26 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1765484054}
   m_CullTransparentMesh: 1
+--- !u!114 &1765484059
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1765484054}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement
+  m_IgnoreLayout: 0
+  m_MinWidth: -1
+  m_MinHeight: -1
+  m_PreferredWidth: 85
+  m_PreferredHeight: 125
+  m_FlexibleWidth: 0
+  m_FlexibleHeight: 0
+  m_LayoutPriority: 1
 --- !u!1 &1767233949
 GameObject:
   m_ObjectHideFlags: 0
@@ -15688,3 +15968,4 @@ SceneRoots:
   - {fileID: 1004046108}
   - {fileID: 805666476}
   - {fileID: 1535067364}
+  - {fileID: 246381850}

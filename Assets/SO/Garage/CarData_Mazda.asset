@@ -16,6 +16,9 @@ MonoBehaviour:
   carRootName: Mazda
   displayCarName: JMP-MAZDA
   displayModelName: RX-7
+  baseDurability: 3
+  baseAcceleration: 3
+  baseSpeed: 4
   baseMaterialTemplate: {fileID: 3989509545427811991, guid: 30dd9974b0e609042b77096928d9b906, type: 3}
   colors:
   - label: Default_Kirmizi

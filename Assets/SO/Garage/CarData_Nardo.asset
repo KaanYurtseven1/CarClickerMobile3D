@@ -16,6 +16,9 @@ MonoBehaviour:
   carRootName: Nardo
   displayCarName: JMP-NARDO
   displayModelName: GT
+  baseDurability: 6
+  baseAcceleration: 5
+  baseSpeed: 5
   baseMaterialTemplate: {fileID: -7686895879745867103, guid: 01388975ae8661c4e9a9a34eb96940e9, type: 3}
   colors:
   - label: Default_Gri

@@ -7,6 +7,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.UI;
+using DG.Tweening;
 
 public class ColorUIController : MonoBehaviour
 {
@@ -20,6 +21,12 @@ public class ColorUIController : MonoBehaviour
     [Tooltip("Scale applied to non-selected buttons.")]
     [SerializeField] private float normalScale = 1.0f;
 
+    [Header("Animation")]
+    [Tooltip("Duration (seconds) for the scale tween.")]
+    [SerializeField] private float tweenDuration = 0.22f;
+    [Tooltip("Ease curve for the scale tween.")]
+    [SerializeField] private Ease tweenEase = Ease.OutBack;
+
     // ─── Callback (set by GarageController) ───
     [NonSerialized] public Action<int> onColorSelected;
 
@@ -27,6 +34,9 @@ public class ColorUIController : MonoBehaviour
     private readonly Button[] _buttons = new Button[6];
     private readonly Image[] _colorImages = new Image[6];
     private readonly RectTransform[] _buttonRects = new RectTransform[6];
+
+    // First Refresh applies instantly (no animation on scene load)
+    private bool _firstRefreshDone;
 
     // ══════════════════ Lifecycle ══════════════════
 
@@ -82,10 +92,14 @@ public class ColorUIController : MonoBehaviour
 
     /// <summary>
     /// Updates the 6 color swatches and applies a selection visual (scale).
+    /// First call applies instantly; subsequent calls animate via DOTween.
     /// </summary>
     public void Refresh(CarDataSO data, int selectedColorIndex)
     {
         if (data == null) return;
+
+        bool animate = _firstRefreshDone;
+        _firstRefreshDone = true;
 
         for (int i = 0; i < 6; i++)
         {
@@ -93,12 +107,31 @@ public class ColorUIController : MonoBehaviour
             if (i < data.colors.Count && _colorImages[i] != null)
                 _colorImages[i].color = data.colors[i].GetColor();
 
-            // Selection feedback via scale
+            // Selection feedback via animated scale
             if (_buttonRects[i] != null)
             {
-                float s = (i == selectedColorIndex) ? selectedScale : normalScale;
-                _buttonRects[i].localScale = Vector3.one * s;
+                float target = (i == selectedColorIndex) ? selectedScale : normalScale;
+                ApplyScale(_buttonRects[i], target, animate);
             }
         }
+    }
+
+    // ══════════════════ Helpers ══════════════════
+
+    private void ApplyScale(RectTransform rect, float target, bool animate)
+    {
+        // Kill any existing tween on this transform to prevent stacking
+        DOTween.Kill(rect);
+
+        if (!animate)
+        {
+            rect.localScale = Vector3.one * target;
+            return;
+        }
+
+        rect.DOScale(Vector3.one * target, tweenDuration)
+            .SetTarget(rect)
+            .SetEase(tweenEase)
+            .SetUpdate(true); // unscaled time so it works even if Time.timeScale changes
     }
 }

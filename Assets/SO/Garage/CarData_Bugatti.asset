@@ -16,6 +16,9 @@ MonoBehaviour:
   carRootName: Bugatti
   displayCarName: JMP-BUGATTI
   displayModelName: CHIRON
+  baseDurability: 8
+  baseAcceleration: 9
+  baseSpeed: 9
   baseMaterialTemplate: {fileID: -5287993169948570957, guid: 1cbc6d4b412e75b469e82b8a77fbfe71, type: 3}
   colors:
   - label: Default_Mavi

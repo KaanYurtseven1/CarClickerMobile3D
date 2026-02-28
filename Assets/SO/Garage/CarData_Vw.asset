@@ -16,6 +16,9 @@ MonoBehaviour:
   carRootName: Vw
   displayCarName: JMP-VW
   displayModelName: GOLF
+  baseDurability: 4
+  baseAcceleration: 5
+  baseSpeed: 4
   baseMaterialTemplate: {fileID: 181608409657680156, guid: 6197efc9847e4a74390c6d6b414eca1f, type: 3}
   colors:
   - label: Default_Bordo

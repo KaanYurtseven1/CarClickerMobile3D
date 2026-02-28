@@ -16,6 +16,9 @@ MonoBehaviour:
   carRootName: Dodge
   displayCarName: JMP-DODGE
   displayModelName: CHARGER
+  baseDurability: 5
+  baseAcceleration: 6
+  baseSpeed: 7
   baseMaterialTemplate: {fileID: 3886234329047305244, guid: 1e3df311e86adbc4f8cda5c151df868c, type: 3}
   colors:
   - label: Default_Kirmizi

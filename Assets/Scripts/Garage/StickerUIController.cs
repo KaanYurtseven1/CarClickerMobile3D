@@ -2,12 +2,14 @@
 // StickerUIController.cs – Manages the 6 sticker preview slots
 //                          and the ArabaStickerOn highlight.
 //
+// Sticker preview sprites are read from CarDataSO.StickerPreviewSprites
+// (colour-independent logo PNGs assigned via the editor tool).
+//
 // Inspector wiring:
 //   arabaStickerOn      → Canvas/CarSticker_BG/ArabaStickerOn
 //   stickerSlotsParent  → Canvas/CarSticker_BG/CarStickers
 // ════════════════════════════════════════════════════════════════
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -25,10 +27,6 @@ public class StickerUIController : MonoBehaviour
     private readonly Button[] _slotButtons = new Button[6];
     private readonly Image[] _slotImages = new Image[6];
     private readonly RectTransform[] _slotRects = new RectTransform[6];
-
-    // ─── Sprite cache:  (carId, colorIndex, stickerIndex) → Sprite ───
-    private readonly Dictionary<(string, int, int), Sprite> _spriteCache
-        = new Dictionary<(string, int, int), Sprite>();
 
     // ══════════════════ Lifecycle ══════════════════
 
@@ -78,18 +76,22 @@ public class StickerUIController : MonoBehaviour
     // ══════════════════ Public API ══════════════════
 
     /// <summary>
-    /// Refreshes all 6 sticker preview images for the given car + colorIndex,
+    /// Refreshes all 6 sticker preview images using the car's pre-assigned
+    /// logo sprites (<see cref="CarDataSO.StickerPreviewSprites"/>),
     /// then moves the highlight to <paramref name="selectedStickerIndex"/>.
     /// </summary>
-    public void Refresh(CarDataSO data, int colorIndex, int selectedStickerIndex)
+    public void Refresh(CarDataSO data, int selectedStickerIndex)
     {
         if (data == null) return;
+
+        var sprites = data.StickerPreviewSprites;
 
         for (int s = 0; s < 6; s++)
         {
             if (_slotImages[s] == null) continue;
 
-            Sprite spr = GetOrCreateSprite(data, colorIndex, s);
+            Sprite spr = (sprites != null && s < sprites.Count) ? sprites[s] : null;
+
             if (spr != null)
             {
                 _slotImages[s].sprite = spr;
@@ -116,40 +118,5 @@ public class StickerUIController : MonoBehaviour
 
         // Match world position so the highlight overlays the selected slot
         arabaStickerOn.position = _slotRects[stickerIndex].position;
-    }
-
-    // ══════════════════ Sprite Cache ══════════════════
-
-    private Sprite GetOrCreateSprite(CarDataSO data, int colorIndex, int stickerIndex)
-    {
-        var key = (data.carId, colorIndex, stickerIndex);
-        if (_spriteCache.TryGetValue(key, out Sprite cached))
-            return cached;
-
-        Texture2D tex = data.GetSkinTexture(colorIndex, stickerIndex);
-        if (tex == null) return null;
-
-        Sprite spr = null;
-        try
-        {
-            spr = Sprite.Create(
-                tex,
-                new Rect(0, 0, tex.width, tex.height),
-                new Vector2(0.5f, 0.5f),
-                100f,
-                0,
-                SpriteMeshType.FullRect
-            );
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning(
-                $"[StickerUIController] Sprite.Create failed for {data.carId} C{colorIndex} S{stickerIndex}. " +
-                $"Ensure the texture has Read/Write enabled in its import settings.  Error: {e.Message}");
-            return null;
-        }
-
-        _spriteCache[key] = spr;
-        return spr;
     }
 }

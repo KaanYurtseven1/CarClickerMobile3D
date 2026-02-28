@@ -25,6 +25,17 @@ public class CarDataSO : ScriptableObject
     /// <summary>The name used to locate the car root Transform under carsParent.</summary>
     public string CarRootName => string.IsNullOrEmpty(carRootName) ? carId : carRootName;
 
+    // ─────────────────── Base Stats ───────────────────
+    [Header("─── Base Stats (0–15) ───")]
+    [Tooltip("Base durability bar value for this car (0–15).")]
+    [Range(0, 15)] public int baseDurability;
+
+    [Tooltip("Base acceleration bar value for this car (0–15).")]
+    [Range(0, 15)] public int baseAcceleration;
+
+    [Tooltip("Base speed bar value for this car (0–15).")]
+    [Range(0, 15)] public int baseSpeed;
+
     // ─────────────────── Base Material ───────────────────
     [Header("─── Base Material ───")]
     [Tooltip("Template material (URP/Lit). The generator copies its shader + properties and swaps _BaseMap.")]
@@ -60,6 +71,16 @@ public class CarDataSO : ScriptableObject
     [Header("─── Generated Materials (36) — Filled by Editor Tool ───")]
     [Tooltip("Flat array: index = colorIndex * 6 + stickerIndex. Populated by Tools ▸ Garage ▸ Generate Materials.")]
     public List<Material> generatedMaterialsFlat = new List<Material>(36);
+
+    // ─────────────────── Sticker Preview Sprites (6) ───────────────────
+    [Header("─── Sticker Preview Sprites (6) — Filled by Editor Tool ───")]
+    [Tooltip("6 sticker logo sprites for the UI preview slots (colour-independent).\n" +
+             "Index 0 = base, 1-5 = variants sorted alphabetically.\n" +
+             "Populated by Tools ▸ Garage ▸ Assign Sticker Logos.")]
+    [SerializeField] private List<Sprite> stickerPreviewSprites = new List<Sprite>(6);
+
+    /// <summary>Read-only access to the 6 sticker logo sprites used by the sticker preview UI.</summary>
+    public IReadOnlyList<Sprite> StickerPreviewSprites => stickerPreviewSprites;
 
     // ─────────────────── Output Folder (Editor Only) ───────────────────
     [Header("─── Output Folder — Editor Only ───")]
@@ -128,5 +149,17 @@ public class CarDataSO : ScriptableObject
         { error = $"[{carId}] partOptions.Count = {partOptions?.Count ?? 0}, expected 18."; return false; }
 
         return true;
+    }
+
+    // ══════════════════ Editor Validation ══════════════════
+
+    private void OnValidate()
+    {
+        if (stickerPreviewSprites == null || stickerPreviewSprites.Count != 6)
+        {
+            Debug.LogWarning($"[CarDataSO:{carId}] stickerPreviewSprites.Count = " +
+                             $"{stickerPreviewSprites?.Count ?? 0}, expected 6. " +
+                             "Run Tools ▸ Garage ▸ Assign Sticker Logos to populate.");
+        }
     }
 }

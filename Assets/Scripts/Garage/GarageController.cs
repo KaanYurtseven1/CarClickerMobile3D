@@ -17,6 +17,7 @@
 //   stickerUI         → StickerUIController component
 //   colorUI           → ColorUIController component
 //   partsUI           → PartsUIController component
+//   barsUI            → BarsUIController component
 // ════════════════════════════════════════════════════════════════
 using System.Collections.Generic;
 using UnityEngine;
@@ -40,6 +41,7 @@ public class GarageController : MonoBehaviour
     [SerializeField] private StickerUIController stickerUI;
     [SerializeField] private ColorUIController colorUI;
     [SerializeField] private PartsUIController partsUI;
+    [SerializeField] private BarsUIController barsUI;
 
     // ─────────────────── Internal State ───────────────────
     private int _currentCarIndex;
@@ -204,8 +206,11 @@ public class GarageController : MonoBehaviour
 
         // Sub-controllers
         if (colorUI != null) colorUI.Refresh(data, state.colorIndex);
-        if (stickerUI != null) stickerUI.Refresh(data, state.colorIndex, state.stickerIndex);
+        if (stickerUI != null) stickerUI.Refresh(data, state.stickerIndex);
         if (partsUI != null) partsUI.Refresh(data, state.enabledParts, database.globalPartKeys);
+
+        // Bars
+        RefreshBars();
     }
 
     // ══════════════════ Public API (called by sub-controllers) ══════════════════
@@ -222,9 +227,9 @@ public class GarageController : MonoBehaviour
         Material mat = CurrentCarData.GetMaterial(state.colorIndex, state.stickerIndex);
         CurrentCustomizer?.ApplySkin(mat);
 
-        // Sticker previews depend on the selected color
+        // Sticker previews are colour-independent; refresh to update highlight
         if (stickerUI != null)
-            stickerUI.Refresh(CurrentCarData, state.colorIndex, state.stickerIndex);
+            stickerUI.Refresh(CurrentCarData, state.stickerIndex);
 
         // Update color selection visual
         if (colorUI != null)
@@ -248,28 +253,88 @@ public class GarageController : MonoBehaviour
             stickerUI.SetHighlight(stickerIndex);
     }
 
-    /// <summary>Toggles a mod part on/off for the active car.</summary>
+    /// <summary>Toggles a mod part on/off for the active car.
+    /// Group-exclusive: only one part per group (Camurluk, Egzoz, Kaput, Spoiler)
+    /// can be equipped at a time.  Equipping a new part in the same group
+    /// automatically removes the previous one.</summary>
     public void TogglePart(string partKey)
     {
         if (string.IsNullOrEmpty(partKey)) return;
 
         CarState state = CurrentState;
 
-        bool nowActive;
         if (state.enabledParts.Contains(partKey))
         {
+            // ── Unequip ──
             state.enabledParts.Remove(partKey);
-            nowActive = false;
+            CurrentCustomizer?.SetPartActive(partKey, false);
+            if (partsUI != null) partsUI.UpdatePartHighlight(partKey, false);
         }
         else
         {
+            // ── Group-exclusive: remove any existing part in the same group ──
+            string group = PartStatData.GetGroupPrefix(partKey);
+            if (group != null)
+            {
+                string existing = null;
+                foreach (string key in state.enabledParts)
+                {
+                    if (key.StartsWith(group)) { existing = key; break; }
+                }
+                if (existing != null)
+                {
+                    state.enabledParts.Remove(existing);
+                    CurrentCustomizer?.SetPartActive(existing, false);
+                    if (partsUI != null) partsUI.UpdatePartHighlight(existing, false);
+                }
+            }
+
+            // ── Equip new part ──
             state.enabledParts.Add(partKey);
-            nowActive = true;
+            CurrentCustomizer?.SetPartActive(partKey, true);
+            if (partsUI != null) partsUI.UpdatePartHighlight(partKey, true);
         }
 
-        CurrentCustomizer?.SetPartActive(partKey, nowActive);
+        RefreshBars();
+    }
 
-        if (partsUI != null)
-            partsUI.UpdatePartHighlight(partKey, nowActive);
+    // ══════════════════ Stats / Bars ══════════════════
+
+    /// <summary>Recomputes stats from base + equipped parts and updates the bars UI.</summary>
+    private void RefreshBars()
+    {
+        if (barsUI == null) return;
+
+        ComputeStats(out int dur, out int acc, out int spd);
+        barsUI.Refresh(dur, acc, spd);
+    }
+
+    /// <summary>
+    /// Calculates clamped (0-15) stat values for the current car using
+    /// <see cref="CarDataSO"/> base stats plus bonuses from equipped parts.
+    /// </summary>
+    private void ComputeStats(out int durability, out int acceleration, out int speed)
+    {
+        CarDataSO data = CurrentCarData;
+        durability = data != null ? data.baseDurability : 0;
+        acceleration = data != null ? data.baseAcceleration : 0;
+        speed = data != null ? data.baseSpeed : 0;
+
+        CarState state = CurrentState;
+        if (state == null) return;
+
+        foreach (string key in state.enabledParts)
+        {
+            if (PartStatData.Bonuses.TryGetValue(key, out PartStatBonus bonus))
+            {
+                durability += bonus.durability;
+                acceleration += bonus.acceleration;
+                speed += bonus.speed;
+            }
+        }
+
+        durability = Mathf.Clamp(durability, 0, 15);
+        acceleration = Mathf.Clamp(acceleration, 0, 15);
+        speed = Mathf.Clamp(speed, 0, 15);
     }
 }

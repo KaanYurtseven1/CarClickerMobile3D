@@ -119,4 +119,11 @@ MonoBehaviour:
   - {fileID: 2100000, guid: b5e607e444d20114db12a571e089b01c, type: 2}
   - {fileID: 2100000, guid: 21e78e9b8be22cc4596a5da1eb4fd5d1, type: 2}
   - {fileID: 2100000, guid: 9a07622d3cd7c0a46a4750dd94c445fa, type: 2}
+  stickerPreviewSprites:
+  - {fileID: 21300000, guid: 1f39d7691e0448a429c75d336fcff1cc, type: 3}
+  - {fileID: 21300000, guid: f87226585d8b4394c949fa6196203f09, type: 3}
+  - {fileID: 21300000, guid: 55ed3de4c32b6f64986bd80de1f67373, type: 3}
+  - {fileID: 21300000, guid: 93a227bb542abdd41816bbb0a93071e1, type: 3}
+  - {fileID: 21300000, guid: 92dde9ba2772d354ca512a475fe60613, type: 3}
+  - {fileID: 21300000, guid: fdc7c64b2036f624f9f5268c652e865d, type: 3}
   outputMaterialFolder: {fileID: 0}

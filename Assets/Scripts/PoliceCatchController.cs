@@ -70,15 +70,62 @@ public class PoliceCatchController : MonoBehaviour
     [SerializeField] private float swayDuration = 0.8f;
 
     [Header("Reward (Success)")]
-    [Tooltip("Number of nitro coins spawned on success.")]
+    [Tooltip("Base number of nitro coins spawned on success. Actual scales with popularity stage.")]
     [SerializeField] private int rewardCoinCount = 10;
     [Tooltip("Interval between reward coin spawns (seconds).")]
     [SerializeField] private float rewardCoinInterval = 0.12f;
     [SerializeField] private NitroCoinSpawner rewardSpawner;
 
+    /// <summary>
+    /// Returns nitro coin reward count scaled by popularity stage.
+    ///   Stage1: 3   Stage2: 5   Stage3: 8
+    ///   Stage4: 12  Stage5: 18  Stage6: 25
+    /// </summary>
+    private int GetStageScaledRewardCoins()
+    {
+        if (PopularityManager.Instance == null) return rewardCoinCount;
+        PopularityStage stage = PopularityManager.Instance.GetCurrentStage();
+        switch (stage)
+        {
+            case PopularityStage.Stage1: return 3;
+            case PopularityStage.Stage2: return 5;
+            case PopularityStage.Stage3: return 8;
+            case PopularityStage.Stage4: return 12;
+            case PopularityStage.Stage5: return 18;
+            case PopularityStage.Stage6: return 25;
+            default: return rewardCoinCount;
+        }
+    }
+
     [Header("Penalty (Fail)")]
-    [Tooltip("Money multiplier on fail (0.75 = lose 25%).")]
+    [Tooltip("Base money multiplier on fail (0.75 = lose 25%). Actual value scales by popularity stage.")]
     [SerializeField] private float failMoneyMultiplier = 0.75f;
+
+    /// <summary>
+    /// Returns a stage-scaled fail money multiplier.
+    /// Early stages = gentler penalty, later stages = harsher.
+    ///   Stage1: 0.90 (lose 10%)
+    ///   Stage2: 0.85 (lose 15%)
+    ///   Stage3: 0.80 (lose 20%)
+    ///   Stage4: 0.72 (lose 28%)
+    ///   Stage5: 0.60 (lose 40%)
+    ///   Stage6: 0.50 (lose 50%)
+    /// </summary>
+    private float GetStageScaledPenalty()
+    {
+        if (PopularityManager.Instance == null) return failMoneyMultiplier;
+        PopularityStage stage = PopularityManager.Instance.GetCurrentStage();
+        switch (stage)
+        {
+            case PopularityStage.Stage1: return 0.90f;
+            case PopularityStage.Stage2: return 0.85f;
+            case PopularityStage.Stage3: return 0.80f;
+            case PopularityStage.Stage4: return 0.72f;
+            case PopularityStage.Stage5: return 0.60f;
+            case PopularityStage.Stage6: return 0.50f;
+            default: return failMoneyMultiplier;
+        }
+    }
 
     // ==================== RUNTIME STATE ====================
 
@@ -563,9 +610,10 @@ public class PoliceCatchController : MonoBehaviour
             {
                 var cm = CurrencyManager.Instance;
                 penaltyBefore = cm.money;
-                cm.money = penaltyBefore * failMoneyMultiplier;
+                float stagePenalty = GetStageScaledPenalty();
+                cm.money = penaltyBefore * stagePenalty;
                 penaltyAfter = cm.money;
-                Debug.Log($"[PoliceCatch] FAIL penalty applied: before={penaltyBefore:F0} after={penaltyAfter:F0}");
+                Debug.Log($"[PoliceCatch] FAIL penalty applied: before={penaltyBefore:F0} after={penaltyAfter:F0} stagePenalty={stagePenalty}");
             }
             yield return new WaitForSeconds(0.5f);
         }
@@ -650,6 +698,13 @@ public class PoliceCatchController : MonoBehaviour
         {
             var cm = CurrencyManager.Instance;
             double before = cm.money;
+
+            // Grant stage-scaled NitroCoins as the success reward
+            int stageRewardCoins = GetStageScaledRewardCoins();
+            cm.AddNitroCoins(stageRewardCoins);
+            Debug.Log($"[PoliceCatch] SUCCESS NitroCoins reward: +{stageRewardCoins}");
+
+            // Also grant a small money bonus (1/8 of balance, unchanged)
             double reward = System.Math.Floor(before / 8.0);
 
             // Apply reward directly to money (bypassing buffer — this is not tap/MPS income)
@@ -949,7 +1004,9 @@ public class PoliceCatchController : MonoBehaviour
             yield break;
         }
 
-        for (int i = 0; i < rewardCoinCount; i++)
+        int coinsToSpawn = GetStageScaledRewardCoins();
+
+        for (int i = 0; i < coinsToSpawn; i++)
         {
             float x = Random.Range(rewardSpawner.minX, rewardSpawner.maxX);
             Vector3 pos = new Vector3(x, rewardSpawner.spawnTop.position.y, rewardSpawner.spawnTop.position.z);

@@ -76,26 +76,39 @@ public class BoostModeController : MonoBehaviour
     public bool IsBoostActive => currentState == BoostState.Active;
 
     /// <summary>
-    /// Returns boost parameters (multiplier, cooldown, maxCharge) for the given card level.
-    /// Level 1: 10x, 45s, 10 charge
-    /// Level 2: 20x, 60s, 15 charge
-    /// Level 3: 30x, 75s, 20 charge
-    /// Level 4: 40x, 90s, 25 charge
-    /// Level 5: 50x, 105s, 30 charge
-    /// Level 6: 60x, 120s, 35 charge
+    /// Returns boost parameters (multiplier, duration, cooldown, maxCharge) for the given card level.
+    /// Balanced tuning: moderate multipliers, duration scales up, cooldown scales DOWN.
+    ///   L1: 3x mult, 6s dur, 60s cd, 5 charge
+    ///   L2: 5x mult, 8s dur, 55s cd, 7 charge
+    ///   L3: 8x mult, 10s dur, 48s cd, 9 charge
+    ///   L4: 12x mult, 12s dur, 40s cd, 12 charge
+    ///   L5: 16x mult, 14s dur, 32s cd, 15 charge
+    ///   L6: 20x mult, 16s dur, 25s cd, 18 charge
     /// </summary>
-    public static (float multiplier, float cooldown, int maxCharge) GetBoostParamsForLevel(int level)
+    public static (float multiplier, float cooldown, int maxCharge, float duration) GetBoostParamsForLevel(int level)
     {
-        if (level <= 0) return (1f, 30f, 10);
+        if (level <= 0) return (1f, 60f, 5, 6f);
 
         // Clamp to max level 6
         level = Mathf.Clamp(level, 1, 6);
 
-        float multiplier = level * 10f;
-        float cooldown = 30f + (level * 15f);
-        int maxCharge = 5 + (level * 5);
+        // Tuning tables (index 0 = L1)
+        float[] multipliers = { 3f, 5f, 8f, 12f, 16f, 20f };
+        float[] durations = { 6f, 8f, 10f, 12f, 14f, 16f };
+        float[] cooldowns = { 60f, 55f, 48f, 40f, 32f, 25f };
+        int[] charges = { 5, 7, 9, 12, 15, 18 };
 
-        return (multiplier, cooldown, maxCharge);
+        int idx = level - 1;
+        return (multipliers[idx], cooldowns[idx], charges[idx], durations[idx]);
+    }
+
+    /// <summary>
+    /// Legacy 3-tuple overload for backward compatibility. Returns (multiplier, cooldown, maxCharge).
+    /// </summary>
+    public static (float multiplier, float cooldown, int maxCharge) GetBoostParamsForLevelLegacy(int level)
+    {
+        var p = GetBoostParamsForLevel(level);
+        return (p.multiplier, p.cooldown, p.maxCharge);
     }
 
     // ==================== SAVE DATA ====================
@@ -255,6 +268,7 @@ public class BoostModeController : MonoBehaviour
             var parameters = GetBoostParamsForLevel(level);
             maxCharge = parameters.maxCharge;
             cooldownSeconds = parameters.cooldown;
+            boostDurationSeconds = parameters.duration;
         }
 
         isUnlocked = level >= 1;

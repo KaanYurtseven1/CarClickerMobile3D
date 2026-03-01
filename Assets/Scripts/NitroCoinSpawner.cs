@@ -13,8 +13,8 @@ public class NitroCoinSpawner : MonoBehaviour
     public float maxX = 1.5f;
 
     [Header("Spawn Timing (seconds)")]
-    public float minSpawnInterval = 20f;
-    public float maxSpawnInterval = 45f;
+    public float minSpawnInterval = 60f;
+    public float maxSpawnInterval = 90f;
 
     private float timer = 0f;
     private float nextSpawnTime = 0f;

@@ -132,9 +132,30 @@ public class BuildingManager : MonoBehaviour
         BuildingDefinition b = GetBuilding(type);
         if (b == null) return 0;
 
-        // cost = baseCost * costMultiplier^count
-        double cost = b.baseCost * Math.Pow(b.costMultiplier, b.count);
+        // Tier-banded cost multiplier based on building index
+        double effectiveMultiplier = GetTieredCostMultiplier(type, b.costMultiplier);
+
+        // cost = baseCost * effectiveMultiplier^count
+        double cost = b.baseCost * Math.Pow(effectiveMultiplier, b.count);
         return cost;
+    }
+
+    /// <summary>
+    /// Returns a tier-banded cost multiplier:
+    ///   Buildings 0–5:  1.15
+    ///   Buildings 6–12: 1.17
+    ///   Buildings 13–20: 1.20
+    ///   Buildings 21–27: 1.25
+    /// Falls back to the building's own costMultiplier if not in range.
+    /// </summary>
+    private double GetTieredCostMultiplier(BuildingType type, double fallback)
+    {
+        int id = (int)type;
+        if (id <= 5) return 1.15;
+        if (id <= 12) return 1.17;
+        if (id <= 20) return 1.20;
+        if (id <= 27) return 1.25;
+        return fallback;
     }
 
     // ═══════════════════════ Progression Lock ═══════════════════════
@@ -435,5 +456,57 @@ public class BuildingManager : MonoBehaviour
     private void OnDestroy()
     {
         if (Instance == this) Instance = null;
+    }
+
+    // ═══════════════════════ Inspector Validation (Change 13) ═══════════════════════
+
+    /// <summary>
+    /// Editor helper: checks that each consecutive building's baseCost is 8–12× the previous.
+    /// Use via Inspector context menu → "Validate BaseCost Gaps".
+    /// </summary>
+    [ContextMenu("Validate BaseCost Gaps (8-12x)")]
+    public void ValidateBaseCostGaps()
+    {
+        if (buildings == null || buildings.Length < 2)
+        {
+            Debug.Log("[BuildingManager] Need at least 2 buildings to validate gaps.");
+            return;
+        }
+
+        // Sort by enum ID for sequential checking
+        var sorted = new List<BuildingDefinition>(buildings);
+        sorted.Sort((a, b) => ((int)a.type).CompareTo((int)b.type));
+
+        bool allGood = true;
+        for (int i = 1; i < sorted.Count; i++)
+        {
+            double prev = sorted[i - 1].baseCost;
+            double curr = sorted[i].baseCost;
+
+            if (prev <= 0)
+            {
+                Debug.LogWarning($"[BaseCostGap] Building #{(int)sorted[i - 1].type} '{sorted[i - 1].displayName}' has baseCost <= 0!");
+                allGood = false;
+                continue;
+            }
+
+            double ratio = curr / prev;
+            if (ratio < 8.0 || ratio > 12.0)
+            {
+                Debug.LogWarning($"[BaseCostGap] #{(int)sorted[i - 1].type} → #{(int)sorted[i].type}: " +
+                                 $"ratio = {ratio:F2}x (baseCost {prev:G6} → {curr:G6}). Target: 8–12×.");
+                allGood = false;
+            }
+            else
+            {
+                Debug.Log($"[BaseCostGap] #{(int)sorted[i - 1].type} → #{(int)sorted[i].type}: " +
+                          $"ratio = {ratio:F2}x ✓");
+            }
+        }
+
+        if (allGood)
+            Debug.Log("[BaseCostGap] All building baseCost gaps are within 8–12× range. ✓");
+        else
+            Debug.LogWarning("[BaseCostGap] Some gaps are out of the 8–12× range. Check warnings above.");
     }
 }

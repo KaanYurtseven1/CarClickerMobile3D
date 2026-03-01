@@ -31,8 +31,9 @@ public class TurboFingerController : MonoBehaviour
     [SerializeField] private float activeDurationSeconds = 30f;
 
     // Level-based multipliers (index = level, value = multiplier)
-    // Level 0 = x1 (locked), Level 1 = x5, Level 2 = x10, etc.
-    private static readonly float[] LevelMultipliers = { 1f, 5f, 10f, 20f, 50f, 100f, 200f };
+    // Level 0 = x1 (locked), Level 1 = x2, Level 2 = x3, etc.
+    // Moderate values: noticeable but not extreme.
+    private static readonly float[] LevelMultipliers = { 1f, 2f, 3f, 5f, 7f, 10f, 14f };
 
     [Header("Cooldown Settings")]
     [Tooltip("Cooldown duration after effect ends in seconds")]

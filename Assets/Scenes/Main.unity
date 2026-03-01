@@ -11928,6 +11928,8 @@ MonoBehaviour:
     copiesOwned: 0
     baseUpgradeCost: 0
     costMultiplier: 0
+    costMultiplierMid: 1.6
+    costMultiplierLate: 1.85
   - type: 1
     displayName: Nitro Rain
     icon: {fileID: 21300000, guid: 40bf313e0fee6384bb09cf6b207b1ae0, type: 3}
@@ -11938,6 +11940,8 @@ MonoBehaviour:
     copiesOwned: 0
     baseUpgradeCost: 0
     costMultiplier: 0
+    costMultiplierMid: 1.6
+    costMultiplierLate: 1.85
   - type: 2
     displayName: Pit Stop Crew
     icon: {fileID: 21300000, guid: ee6059175fe9b264297517324d3cbb7b, type: 3}
@@ -11948,6 +11952,8 @@ MonoBehaviour:
     copiesOwned: 0
     baseUpgradeCost: 0
     costMultiplier: 0
+    costMultiplierMid: 1.6
+    costMultiplierLate: 1.85
   - type: 3
     displayName: Garage Manager
     icon: {fileID: 21300000, guid: b8954c20eeb1b8d4898ecc6f071da1a9, type: 3}
@@ -11958,6 +11964,8 @@ MonoBehaviour:
     copiesOwned: 0
     baseUpgradeCost: 0
     costMultiplier: 0
+    costMultiplierMid: 1.6
+    costMultiplierLate: 1.85
   - type: 4
     displayName: Boost Mode
     icon: {fileID: 21300000, guid: 841ca9b833cc7dd40b97722fade0a2b1, type: 3}
@@ -11968,6 +11976,8 @@ MonoBehaviour:
     copiesOwned: 0
     baseUpgradeCost: 0
     costMultiplier: 0
+    costMultiplierMid: 1.6
+    costMultiplierLate: 1.85
   - type: 5
     displayName: Small Investment
     icon: {fileID: 21300000, guid: a7db2a057825a4c4eade228994d1a22e, type: 3}
@@ -11978,6 +11988,8 @@ MonoBehaviour:
     copiesOwned: 0
     baseUpgradeCost: 0
     costMultiplier: 0
+    costMultiplierMid: 1.6
+    costMultiplierLate: 1.85
   - type: 6
     displayName: Momentum
     icon: {fileID: 21300000, guid: 4f62477466436804f85775733a4cbe65, type: 3}
@@ -11988,6 +12000,8 @@ MonoBehaviour:
     copiesOwned: 0
     baseUpgradeCost: 0
     costMultiplier: 0
+    costMultiplierMid: 1.6
+    costMultiplierLate: 1.85
   - type: 7
     displayName: Nitro Magnet
     icon: {fileID: 21300000, guid: ae0a641facaafe64cba0e3e1aca84631, type: 3}
@@ -11998,6 +12012,8 @@ MonoBehaviour:
     copiesOwned: 0
     baseUpgradeCost: 0
     costMultiplier: 0
+    costMultiplierMid: 1.6
+    costMultiplierLate: 1.85
   turboFingerTapBonusPerLevel: 2
   garageManagerPercentPerLevel: 0.05
 --- !u!4 &358039547
@@ -28565,8 +28581,8 @@ MonoBehaviour:
   spawnBottom: {fileID: 636137939}
   minX: -2
   maxX: 2
-  minSpawnInterval: 5
-  maxSpawnInterval: 10
+  minSpawnInterval: 60
+  maxSpawnInterval: 90
 --- !u!4 &723224883
 Transform:
   m_ObjectHideFlags: 0
@@ -51854,8 +51870,8 @@ MonoBehaviour:
   chestPrefab: {fileID: 2398063076181889729, guid: 81e32e62144b0eb4e883ebf1c237d0de, type: 3}
   spawnTop: {fileID: 111146864}
   spawnBottom: {fileID: 636137939}
-  minSpawnInterval: 5
-  maxSpawnInterval: 15
+  minSpawnInterval: 45
+  maxSpawnInterval: 75
   minX: -1.61
   maxX: 2.9
   useFixedY: 1
@@ -67084,6 +67100,9 @@ MonoBehaviour:
   cardSlot3: {fileID: 102611496}
   slot2Price: 15
   slot3Price: 30
+  slot2PriceStep: 5
+  slot3PriceStep: 10
+  copiesStepPerPurchase: 1
   copiesPerPurchase: 5
   freeMoneyMin: 50
   freeMoneyMax: 200
@@ -74167,6 +74186,9 @@ MonoBehaviour:
   spawnPointRight: {fileID: 2121792663}
   spawnInterval: 10
   spawnVariance: 0
+  minSpawnInterval: 8
+  mpsForFastest: 50000
+  enableProgressionScaling: 1
   maxAliveRadars: 1
 --- !u!4 &2028230230
 Transform:

@@ -149,12 +149,12 @@ public class ChestPopupController : MonoBehaviour
         }
     }
 
-    // ✅ NITRO COIN ile beklemeden açma (3 coin)
+    // ✅ NITRO COIN ile beklemeden açma (15 coin — increased from 3)
     public void OnOpenNowPressed()
     {
         if (ChestInventoryManager.Instance == null) return;
 
-        bool ok = ChestInventoryManager.Instance.OpenNowByNitro(3);
+        bool ok = ChestInventoryManager.Instance.OpenNowByNitro(15);
         if (ok)
         {
             RefreshUI();

@@ -37,6 +37,14 @@ public class DailyOffersController : MonoBehaviour
     [SerializeField] private int slot2Price = 15;
     [SerializeField] private int slot3Price = 30;
 
+    [Header("Per-Purchase Scaling (prices & copies increase each buy)")]
+    [Tooltip("Price increase per purchase for slot 2.")]
+    [SerializeField] private int slot2PriceStep = 5;
+    [Tooltip("Price increase per purchase for slot 3.")]
+    [SerializeField] private int slot3PriceStep = 10;
+    [Tooltip("Copy bonus per purchase (added on top of base copies).")]
+    [SerializeField] private int copiesStepPerPurchase = 1;
+
     [Header("Card Copies Granted")]
     [SerializeField] private int copiesPerPurchase = 5;
 
@@ -57,6 +65,8 @@ public class DailyOffersController : MonoBehaviour
     private const string KEY_SLOT3_CARD = "DailyOffers_Slot3Card";
     private const string KEY_SLOT2_BOUGHT = "DailyOffers_Slot2Bought";
     private const string KEY_SLOT3_BOUGHT = "DailyOffers_Slot3Bought";
+    private const string KEY_SLOT2_PURCHASES = "DailyOffers_Slot2Purchases";
+    private const string KEY_SLOT3_PURCHASES = "DailyOffers_Slot3Purchases";
 
     // ──────────────────────────────── Runtime state ────────────────────────────
 
@@ -66,6 +76,10 @@ public class DailyOffersController : MonoBehaviour
     private bool slot3Bought;
     private CardType slot2Card;
     private CardType slot3Card;
+
+    // Per-purchase scaling: total lifetime purchases for each slot (persists across days)
+    private int slot2TotalPurchases = 0;
+    private int slot3TotalPurchases = 0;
 
     private Coroutine timerCoroutine;
 
@@ -316,7 +330,7 @@ public class DailyOffersController : MonoBehaviour
 
     // ──────────────────────────────── Card Purchase Logic ──────────────────────
 
-    private void TryPurchaseCardSlot(CardType cardType, int price, bool isSlot2)
+    private void TryPurchaseCardSlot(CardType cardType, int basePrice, bool isSlot2)
     {
         // Validate CurrencyManager
         if (CurrencyManager.Instance == null)
@@ -340,23 +354,35 @@ public class DailyOffersController : MonoBehaviour
             return;
         }
 
+        // Calculate scaled price based on total lifetime purchases
+        int totalPurchases = isSlot2 ? slot2TotalPurchases : slot3TotalPurchases;
+        int priceStep = isSlot2 ? slot2PriceStep : slot3PriceStep;
+        int scaledPrice = basePrice + (totalPurchases * priceStep);
+        int scaledCopies = copiesPerPurchase + (totalPurchases * copiesStepPerPurchase);
+
         // Spend NitroCoins
-        if (!CurrencyManager.Instance.TrySpendNitroCoins(price))
+        if (!CurrencyManager.Instance.TrySpendNitroCoins(scaledPrice))
         {
-            Debug.Log($"[DailyOffers] Not enough NitroCoins. Need {price}, have {CurrencyManager.Instance.nitroCoins}.");
+            Debug.Log($"[DailyOffers] Not enough NitroCoins. Need {scaledPrice}, have {CurrencyManager.Instance.nitroCoins}.");
             return;
         }
 
         // Grant copies (does NOT auto-upgrade — matches requirement)
-        CardManager.Instance.AddCardCopies(cardType, copiesPerPurchase);
+        CardManager.Instance.AddCardCopies(cardType, scaledCopies);
 
-        Debug.Log($"[DailyOffers] Purchased +{copiesPerPurchase} copies of {cardType} for {price} NitroCoins.");
+        Debug.Log($"[DailyOffers] Purchased +{scaledCopies} copies of {cardType} for {scaledPrice} NitroCoins (purchase #{totalPurchases + 1}).");
 
-        // Mark purchased
+        // Mark purchased & increment lifetime counter
         if (isSlot2)
+        {
             slot2Bought = true;
+            slot2TotalPurchases++;
+        }
         else
+        {
             slot3Bought = true;
+            slot3TotalPurchases++;
+        }
 
         SaveState();
         RefreshCardSlotUI(isSlot2);
@@ -396,7 +422,12 @@ public class DailyOffersController : MonoBehaviour
         DailyOfferSlotUI slot = isSlot2 ? cardSlot2 : cardSlot3;
         CardType type = isSlot2 ? slot2Card : slot3Card;
         bool bought = isSlot2 ? slot2Bought : slot3Bought;
-        int price = isSlot2 ? slot2Price : slot3Price;
+        int basePrice = isSlot2 ? slot2Price : slot3Price;
+
+        // Calculate scaled price for display
+        int totalPurchases = isSlot2 ? slot2TotalPurchases : slot3TotalPurchases;
+        int priceStep = isSlot2 ? slot2PriceStep : slot3PriceStep;
+        int scaledPrice = basePrice + (totalPurchases * priceStep);
 
         if (slot == null) return;
 
@@ -435,7 +466,7 @@ public class DailyOffersController : MonoBehaviour
         }
         else
         {
-            slot.SetAvailable(price.ToString());
+            slot.SetAvailable(scaledPrice.ToString());
         }
     }
 
@@ -459,6 +490,8 @@ public class DailyOffersController : MonoBehaviour
         PlayerPrefs.SetString(KEY_SLOT3_CARD, slot3Card.ToString());
         PlayerPrefs.SetInt(KEY_SLOT2_BOUGHT, slot2Bought ? 1 : 0);
         PlayerPrefs.SetInt(KEY_SLOT3_BOUGHT, slot3Bought ? 1 : 0);
+        PlayerPrefs.SetInt(KEY_SLOT2_PURCHASES, slot2TotalPurchases);
+        PlayerPrefs.SetInt(KEY_SLOT3_PURCHASES, slot3TotalPurchases);
         PlayerPrefs.Save();
     }
 
@@ -495,6 +528,10 @@ public class DailyOffersController : MonoBehaviour
         freeClaimed = PlayerPrefs.GetInt(KEY_FREE_CLAIMED, 0) == 1;
         slot2Bought = PlayerPrefs.GetInt(KEY_SLOT2_BOUGHT, 0) == 1;
         slot3Bought = PlayerPrefs.GetInt(KEY_SLOT3_BOUGHT, 0) == 1;
+
+        // Per-purchase scaling counters (persist across daily resets)
+        slot2TotalPurchases = PlayerPrefs.GetInt(KEY_SLOT2_PURCHASES, 0);
+        slot3TotalPurchases = PlayerPrefs.GetInt(KEY_SLOT3_PURCHASES, 0);
 
         // Card types
         string s2 = PlayerPrefs.GetString(KEY_SLOT2_CARD, "");

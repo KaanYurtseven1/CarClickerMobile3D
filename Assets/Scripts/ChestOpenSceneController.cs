@@ -56,6 +56,12 @@ public class ChestOpenSceneController : MonoBehaviour
     [SerializeField] private bool useRuntimePivotFix = false;
     [SerializeField] private Vector3 pivotOffset = new Vector3(0, 0.5f, -0.5f);
 
+    [Header("MPS-Based Chest Gold (replaces old multiplier system)")]
+    [Tooltip("Minimum MPS multiplier for chest gold reward.")]
+    [SerializeField] private float chestGoldMPSMin = 30f;
+    [Tooltip("Maximum MPS multiplier for chest gold reward.")]
+    [SerializeField] private float chestGoldMPSMax = 120f;
+
     [Header("Reward Reveal")]
     [Tooltip("ChestRewardRevealController on RewardRevealRoot")]
     [SerializeField] private ChestRewardRevealController revealController;
@@ -664,13 +670,16 @@ public class ChestOpenSceneController : MonoBehaviour
 #endif
         }
 
-        //  Money (multiplier-based on current balance) 
-        double curMoney = CurrencyManager.Instance != null ? CurrencyManager.Instance.money : 1000;
+        //  Money — MPS-based flat reward (replaces old multiplier system).
+        //  Chest gold now grants a flat amount = MPS × random(chestGoldMPSMin, chestGoldMPSMax)
+        //  instead of the old "current-money × multiplier" design.
+        double curMoney = CurrencyManager.Instance != null ? CurrencyManager.Instance.money : 0;
+        double mps = CurrencyManager.Instance != null ? CurrencyManager.Instance.moneyPerSecond : 0;
+        double mpsGold = System.Math.Floor(mps * Random.Range(chestGoldMPSMin, chestGoldMPSMax));
         rewardPackage.currentMoney = curMoney;
-        rewardPackage.moneyMultiplier = ChestRewardPackage.MoneyMultipliers[
-            Random.Range(0, ChestRewardPackage.MoneyMultipliers.Length)];
-        rewardPackage.moneyGained = curMoney * (rewardPackage.moneyMultiplier - 1);
-        rewardPackage.finalMoneyShown = curMoney * rewardPackage.moneyMultiplier;
+        rewardPackage.moneyMultiplier = 1; // Display as 1x for UI compatibility
+        rewardPackage.moneyGained = mpsGold;
+        rewardPackage.finalMoneyShown = curMoney + mpsGold;
 
         //  Nitro (additive) 
         rewardPackage.nitroReward = ChestRewardPackage.NitroAmounts[

@@ -15,10 +15,18 @@ public class RadarSpawner : MonoBehaviour
     [SerializeField] private Transform spawnPointRight;
 
     [Header("Timing")]
-    [Tooltip("Seconds between spawns.")]
+    [Tooltip("Base seconds between spawns (before progression scaling).")]
     [SerializeField] private float spawnInterval = 20f;
     [Tooltip("Random variance added to interval (±). 0 = fixed interval.")]
     [SerializeField] private float spawnVariance = 0f;
+
+    [Header("Progression Scaling")]
+    [Tooltip("Minimum spawn interval (fastest possible, seconds). Capped so radars remain tappable.")]
+    [SerializeField] private float minSpawnInterval = 8f;
+    [Tooltip("MPS threshold at which spawn interval reaches minimum.")]
+    [SerializeField] private double mpsForFastest = 50000;
+    [Tooltip("Enable progression-based spawn speed scaling.")]
+    [SerializeField] private bool enableProgressionScaling = true;
 
     [Header("Limits")]
     [Tooltip("Maximum radar objects alive at once.")]
@@ -53,8 +61,28 @@ public class RadarSpawner : MonoBehaviour
     private void ScheduleNext()
     {
         timer = 0f;
-        nextSpawnTime = spawnInterval + Random.Range(-spawnVariance, spawnVariance);
+        float effectiveInterval = GetProgressionScaledInterval();
+        nextSpawnTime = effectiveInterval + Random.Range(-spawnVariance, spawnVariance);
         if (nextSpawnTime < 1f) nextSpawnTime = 1f; // safety floor
+    }
+
+    /// <summary>
+    /// Returns spawn interval scaled by player progression (MPS).
+    /// Uses Lerp from spawnInterval down to minSpawnInterval based on current MPS.
+    /// Clamp ensures it's always humanly tappable.
+    /// </summary>
+    private float GetProgressionScaledInterval()
+    {
+        if (!enableProgressionScaling) return spawnInterval;
+        if (CurrencyManager.Instance == null) return spawnInterval;
+
+        double currentMPS = CurrencyManager.Instance.moneyPerSecond;
+        if (currentMPS <= 0) return spawnInterval;
+
+        // t = 0..1 based on log-scale MPS progression
+        // Use log10 to make the curve feel smooth across orders of magnitude
+        float t = Mathf.Clamp01((float)(System.Math.Log10(System.Math.Max(1, currentMPS)) / System.Math.Log10(System.Math.Max(2, mpsForFastest))));
+        return Mathf.Lerp(spawnInterval, minSpawnInterval, t);
     }
 
     private void TrySpawn()

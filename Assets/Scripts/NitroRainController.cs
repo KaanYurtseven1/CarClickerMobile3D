@@ -75,8 +75,9 @@ public class NitroRainController : MonoBehaviour
 
     // Level-based configuration (index = level)
     // [0] = level 0 (locked/unused), [1] = level 1, etc.
+    // Required collects INCREASED to be less frequent (original: 3,4,5,6,7,8)
     // Duration scaling: L1=5s, L2=8s, L3=11s, L4=14s, L5=17s, L6=20s (+3s per level)
-    private static readonly int[] RequiredCollects = { 0, 3, 4, 5, 6, 7, 8 };
+    private static readonly int[] RequiredCollects = { 0, 5, 7, 9, 11, 13, 16 };
     private static readonly float[] RainDurations = { 0f, 5f, 8f, 11f, 14f, 17f, 20f };
 
     // ==================== STATE ====================

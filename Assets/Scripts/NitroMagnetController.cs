@@ -63,10 +63,10 @@ public class NitroMagnetController : MonoBehaviour
     [Tooltip("Maximum seconds the magnet stays armed without collecting. 0 = no timeout.")]
     public float maxArmedDuration = 30f;
 
-    [Header("Level Configuration: [Taps Required, Coins to Collect]")]
-    [Tooltip("L1: [30, 3], L2: [40, 4], L3: [50, 5], L4: [55, 7], L5: [60, 9], L6: [70, 12]")]
-    public int[] tapsRequired = { 30, 40, 50, 55, 60, 70 };
-    public int[] coinsToCollect = { 3, 4, 5, 7, 9, 12 };
+    [Header("Level Configuration: [Taps Required, Coins to Collect]  (nerfed)")]
+    [Tooltip("L1: [40, 2], L2: [50, 3], L3: [60, 4], L4: [70, 5], L5: [80, 7], L6: [90, 9]")]
+    public int[] tapsRequired = { 40, 50, 60, 70, 80, 90 };
+    public int[] coinsToCollect = { 2, 3, 4, 5, 7, 9 };
 
     [Header("Debug")]
     [SerializeField] private bool enableDebugLogs = true;

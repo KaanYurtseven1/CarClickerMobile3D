@@ -49,16 +49,34 @@ public class CardDefinition
     [Tooltip("Base cost for level 0 to 1 upgrade")]
     public double baseUpgradeCost = 10;
 
-    [Tooltip("Cost multiplier applied per level")]
+    [Tooltip("Cost multiplier for levels 1-6")]
     public double costMultiplier = 1.4;
+
+    [Tooltip("Cost multiplier for levels 7-12 (steeper mid-game)")]
+    public double costMultiplierMid = 1.6;
+
+    [Tooltip("Cost multiplier for levels 13+ (late-game wall)")]
+    public double costMultiplierLate = 1.85;
 
     /// <summary>
     /// Returns the money cost to upgrade from currentLevel to currentLevel+1.
-    /// Uses double to safely handle high levels without overflow.
+    /// Uses banded multipliers: L1-6 = costMultiplier, L7-12 = costMultiplierMid, L13+ = costMultiplierLate.
     /// </summary>
     public double GetUpgradeCost()
     {
-        return baseUpgradeCost * System.Math.Pow(costMultiplier, currentLevel);
+        double cost = baseUpgradeCost;
+        for (int lvl = 0; lvl < currentLevel; lvl++)
+        {
+            double mult;
+            if (lvl < 6)
+                mult = costMultiplier;
+            else if (lvl < 12)
+                mult = costMultiplierMid;
+            else
+                mult = costMultiplierLate;
+            cost *= mult;
+        }
+        return System.Math.Floor(cost);
     }
 
     /// <summary>

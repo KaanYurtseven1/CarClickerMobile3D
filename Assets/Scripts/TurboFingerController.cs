@@ -33,7 +33,7 @@ public class TurboFingerController : MonoBehaviour
     // Level-based multipliers (index = level, value = multiplier)
     // Level 0 = x1 (locked), Level 1 = x2, Level 2 = x3, etc.
     // Moderate values: noticeable but not extreme.
-    private static readonly float[] LevelMultipliers = { 1f, 2f, 3f, 5f, 7f, 10f, 14f };
+    private static readonly float[] LevelMultipliers = { 2f, 4f, 6f, 10f, 15f, 22f, 30f };
 
     [Header("Cooldown Settings")]
     [Tooltip("Cooldown duration after effect ends in seconds")]
@@ -290,6 +290,10 @@ public class TurboFingerController : MonoBehaviour
         float multiplier = GetMultiplierForLevel(cardLevel);
         Debug.Log($"[TurboFingerController] ACTIVATED! Card Level: {cardLevel}, Multiplier: {multiplier}x for {activeDurationSeconds}s.");
 
+        // F1: Turbo Finger activate SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayTurboFingerActivate();
+
         OnActivated?.Invoke();
     }
 
@@ -299,6 +303,10 @@ public class TurboFingerController : MonoBehaviour
         _stateEndTime = Time.time + cooldownDurationSeconds;
 
         Debug.Log($"[TurboFingerController] Effect ENDED. Entering cooldown for {cooldownDurationSeconds}s.");
+
+        // F2: Turbo Finger deactivate SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayTurboFingerDeactivate();
 
         OnEffectEnded?.Invoke();
     }
@@ -333,4 +341,9 @@ public class TurboFingerController : MonoBehaviour
         */
     }
 #endif
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+    }
 }

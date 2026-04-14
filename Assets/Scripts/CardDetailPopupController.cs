@@ -111,6 +111,7 @@ public class CardDetailPopupController : MonoBehaviour
 
     private void Awake()
     {
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
 
         // Build O(1) theme lookup from database
@@ -327,6 +328,7 @@ public class CardDetailPopupController : MonoBehaviour
     private void OnDestroy()
     {
         KillCurrentSequence();
+        if (Instance == this) Instance = null;
     }
 
     // =====================================================================

@@ -16,7 +16,8 @@ public static class CardDropTuning
     //  RARITY BASE WEIGHTS  (used when selecting WHICH card drops)
     //  Indices: 0 = Common, 1 = Rare, 2 = Epic, 3 = Legendary
     // =====================================================================
-    public static readonly float[] RarityBaseWeights = { 50f, 30f, 15f, 5f };
+    // Indices: 0=Common, 1=Rare, 2=Epic, 3=Legendary (weight 0 = disabled)
+    public static readonly float[] RarityBaseWeights = { 50f, 30f, 15f, 0f };
 
     // =====================================================================
     //  LEVEL-BASED SELECTION DECAY

@@ -91,6 +91,10 @@ public class CurrencyManager : MonoBehaviour
     private double lastTotalMoneyForMps = 0;
     private double displayedMps = 0;
 
+    // Offline earnings tracking — excluded from MPS display
+    private double _offlineEarningsTotal = 0;
+    private double _lastOfflineEarningsForMps = 0;
+
     [Header("Nitro Coin")]
     public int nitroCoins = 0;
 
@@ -111,16 +115,21 @@ public class CurrencyManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
+
+            // DontDestroyOnLoad only works on ROOT GameObjects.
+            // If CurrencyManager is a child (e.g. under "GameManager" under "Managers"), detach first.
+            if (transform.parent != null)
+            {
+                Debug.Log($"[CurrencyManager] Detaching from parent '{transform.parent.name}' for DontDestroyOnLoad.");
+                transform.SetParent(null);
+            }
+
             DontDestroyOnLoad(gameObject);
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"[CurrencyManager] Instance set (ID={GetInstanceID()})");
-#endif
+            Debug.Log($"[CurrencyManager] Instance set (ID={GetInstanceID()}), DontDestroyOnLoad applied.");
         }
         else if (Instance != this)
         {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.LogWarning($"[CurrencyManager] Duplicate detected (ID={GetInstanceID()}) — destroying. Active instance ID={Instance.GetInstanceID()}");
-#endif
             Destroy(gameObject);
             return;
         }
@@ -184,7 +193,13 @@ public class CurrencyManager : MonoBehaviour
                 garageBonus = GarageManagerController.Instance.CurrentBonusMps;
             }
 
-            double effectiveMPS = (baseMps + garageBonus) * incomeBoostMultiplier;
+            double cardMultiplier = 1.0;
+            if (CardManager.Instance != null)
+            {
+                cardMultiplier = CardManager.Instance.GetGlobalMpsMultiplierFromCards();
+            }
+
+            double effectiveMPS = (baseMps + garageBonus) * incomeBoostMultiplier * cardMultiplier;
 
             passiveBuffer += effectiveMPS * Time.deltaTime;
 
@@ -206,6 +221,13 @@ public class CurrencyManager : MonoBehaviour
             if (mpsTimer >= mpsMeasureInterval)
             {
                 double earnedDelta = totalMoneyEarned - lastTotalMoneyForMps;   // pencere boyunca kazanılan para
+
+                // Subtract offline earnings that fell within this window so
+                // PitStopCrew payouts don't spike the displayed MPS.
+                double offlineDelta = _offlineEarningsTotal - _lastOfflineEarningsForMps;
+                earnedDelta -= offlineDelta;
+                if (earnedDelta < 0) earnedDelta = 0;
+
                 double newMps = earnedDelta / mpsMeasureInterval;              // saniye başına düşen para
 
                 // Buradaki logic sende vardı, aynen bıraktım:
@@ -216,6 +238,7 @@ public class CurrencyManager : MonoBehaviour
                 }
 
                 lastTotalMoneyForMps = totalMoneyEarned;
+                _lastOfflineEarningsForMps = _offlineEarningsTotal;
                 mpsTimer = 0f;
             }
         }
@@ -493,14 +516,30 @@ public class CurrencyManager : MonoBehaviour
     public void ResetMpsAfterLoad()
     {
         lastTotalMoneyForMps = totalMoneyEarned;
+        _lastOfflineEarningsForMps = _offlineEarningsTotal;
         mpsTimer = 0f;
-        displayedMps = 0;  // <<< Save/load sonrası ilk pencereyi beklesin
+        // Seed with known auto-MPS from buildings so the display doesn't
+        // start at 0 while waiting for the first measurement window.
+        displayedMps = GetAutoMPS();
+    }
+
+    /// <summary>
+    /// Mark an amount as offline earnings so it is excluded from the
+    /// displayed MPS calculation. Call BEFORE granting the money.
+    /// </summary>
+    public void MarkOfflineEarnings(double amount)
+    {
+        _offlineEarningsTotal += amount;
     }
 
     // Bu fonksiyonu başka yerlerde kullanıyorsun diye aynen bıraktım
     public double GetAutoMPS()
     {
-        double baseMps = moneyPerSecond * incomeBoostMultiplier;
+        double garageBonus = 0;
+        if (GarageManagerController.Instance != null)
+            garageBonus = GarageManagerController.Instance.CurrentBonusMps;
+
+        double baseMps = (moneyPerSecond + garageBonus) * incomeBoostMultiplier;
         if (CardManager.Instance != null)
         {
             baseMps *= CardManager.Instance.GetGlobalMpsMultiplierFromCards();

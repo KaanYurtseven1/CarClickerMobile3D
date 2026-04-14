@@ -55,10 +55,21 @@ public class CardManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
+
+            // DontDestroyOnLoad only works on ROOT GameObjects.
+            // If CardManager is a child (e.g. under "Managers"), detach first.
+            if (transform.parent != null)
+            {
+                Debug.Log($"[CardManager] Detaching from parent '{transform.parent.name}' for DontDestroyOnLoad.");
+                transform.SetParent(null);
+            }
+
             DontDestroyOnLoad(gameObject);
+            Debug.Log($"[CardManager] Instance assigned to {name}#{GetInstanceID()}, DontDestroyOnLoad applied. cards={cards?.Length ?? 0}");
         }
         else if (Instance != this)
         {
+            Debug.Log($"[CardManager] Duplicate detected ({name}#{GetInstanceID()}), destroying. Keeping {Instance.name}#{Instance.GetInstanceID()}");
             Destroy(gameObject);
             return;
         }
@@ -340,18 +351,6 @@ public class CardManager : MonoBehaviour
     {
         // NitroRain logic moved to NitroRainController
         return 1f;
-    }
-
-    /// <summary>
-    /// PitStopCrew için offline production yüzdesi.
-    /// Örn: level başına %5 → level 2 = %10
-    /// </summary>
-    public float GetOfflineProductionPercent()
-    {
-        CardDefinition c = GetCard(CardType.PitStopCrew);
-        if (c == null) return 0f;
-
-        return 0.05f * c.currentLevel; // 0.10 = %10 vs.
     }
 
     public void AddCardCopies(CardType type, int amount)

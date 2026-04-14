@@ -24,6 +24,7 @@ public class PopularityManager : MonoBehaviour
     {
         Instance = null;
         OnRadarPhotoTaken = null;
+        OnRadarDefused = null;
     }
 
     // ==================== EVENTS ====================
@@ -35,9 +36,15 @@ public class PopularityManager : MonoBehaviour
 
     /// <summary>
     /// Static event fired when a radar takes a photo (player missed the radar).
-    /// Subscribers (e.g. PoliceCatchTrigger) use this to track catch count.
+    /// Subscribers (e.g. PoliceCatchTrigger, AmbientHeatManager) use this to track catch count.
     /// </summary>
     public static event Action OnRadarPhotoTaken;
+
+    /// <summary>
+    /// Static event fired when the player successfully taps and defuses a radar.
+    /// Subscribers (e.g. AmbientHeatManager) use this to slightly cool hidden heat.
+    /// </summary>
+    public static event Action OnRadarDefused;
 
     // ==================== STAGE COLORS ====================
 
@@ -179,8 +186,15 @@ public class PopularityManager : MonoBehaviour
         if (Mathf.Approximately(after, popularity01))
             return;
 
+        // P11: Detect stage boundary crossing for stage-up SFX
+        PopularityStage stageBefore = GetStageForValue(popularity01);
+        PopularityStage stageAfter = GetStageForValue(after);
+
         popularity01 = after;
         OnPopularityChanged?.Invoke(popularity01);
+
+        if (stageAfter > stageBefore && SFXManager.Instance != null)
+            SFXManager.Instance.PlayPopularityStageUp();
     }
 
     /// <summary>
@@ -226,6 +240,15 @@ public class PopularityManager : MonoBehaviour
     public void NotifyRadarPhotoTaken()
     {
         OnRadarPhotoTaken?.Invoke();
+    }
+
+    /// <summary>
+    /// Call this when the player defuses a radar (tapped it successfully).
+    /// Fires the static OnRadarDefused event so subscribers (e.g. AmbientHeatManager) can react.
+    /// </summary>
+    public void NotifyRadarDefused()
+    {
+        OnRadarDefused?.Invoke();
     }
 
     // ==================== HELPERS ====================

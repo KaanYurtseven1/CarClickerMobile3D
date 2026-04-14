@@ -2,10 +2,23 @@ using UnityEngine;
 
 public class BottomBarController : MonoBehaviour
 {
+    public static BottomBarController Instance { get; private set; }
+
     public BottomBarTabUI[] tabs;
-    public int defaultTabIndex = 2; // örn: Clicker tab’i başlangıç
+    public int defaultTabIndex = 2; // örn: Clicker tab'i başlangıç
 
     private int currentIndex = -1;
+
+    private void Awake()
+    {
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+        Instance = this;
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+    }
 
     private void Start()
     {
@@ -33,6 +46,10 @@ public class BottomBarController : MonoBehaviour
     // Button OnClick'lerden çağırmak için
     public void OnTabButtonClicked(int index)
     {
+        // U1: UI click SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayUIClick();
+
         SetActiveTab(index);
     }
 

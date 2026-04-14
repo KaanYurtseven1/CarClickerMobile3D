@@ -155,7 +155,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::NitroCoin
   rewardAmount: 1
   arcTarget: {fileID: 1507647077317380899}
-  speed: 80
+  speed: 200
   despawnZ: 0
 --- !u!136 &6422014573975923957
 CapsuleCollider:

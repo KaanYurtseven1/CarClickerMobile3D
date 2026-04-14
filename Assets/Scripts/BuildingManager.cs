@@ -145,7 +145,7 @@ public class BuildingManager : MonoBehaviour
     ///   Buildings 0–5:  1.15
     ///   Buildings 6–12: 1.17
     ///   Buildings 13–20: 1.20
-    ///   Buildings 21–27: 1.25
+    ///   Buildings 21–27: 1.20
     /// Falls back to the building's own costMultiplier if not in range.
     /// </summary>
     private double GetTieredCostMultiplier(BuildingType type, double fallback)
@@ -154,7 +154,7 @@ public class BuildingManager : MonoBehaviour
         if (id <= 5) return 1.15;
         if (id <= 12) return 1.17;
         if (id <= 20) return 1.20;
-        if (id <= 27) return 1.25;
+        if (id <= 27) return 1.20;
         return fallback;
     }
 
@@ -464,7 +464,7 @@ public class BuildingManager : MonoBehaviour
     /// Editor helper: checks that each consecutive building's baseCost is 8–12× the previous.
     /// Use via Inspector context menu → "Validate BaseCost Gaps".
     /// </summary>
-    [ContextMenu("Validate BaseCost Gaps (8-12x)")]
+    [ContextMenu("Validate BaseCost Gaps (3-7x)")]
     public void ValidateBaseCostGaps()
     {
         if (buildings == null || buildings.Length < 2)
@@ -491,10 +491,10 @@ public class BuildingManager : MonoBehaviour
             }
 
             double ratio = curr / prev;
-            if (ratio < 8.0 || ratio > 12.0)
+            if (ratio < 3.0 || ratio > 7.0)
             {
                 Debug.LogWarning($"[BaseCostGap] #{(int)sorted[i - 1].type} → #{(int)sorted[i].type}: " +
-                                 $"ratio = {ratio:F2}x (baseCost {prev:G6} → {curr:G6}). Target: 8–12×.");
+                                 $"ratio = {ratio:F2}x (baseCost {prev:G6} → {curr:G6}). Target: 3–7×.");
                 allGood = false;
             }
             else
@@ -505,8 +505,8 @@ public class BuildingManager : MonoBehaviour
         }
 
         if (allGood)
-            Debug.Log("[BaseCostGap] All building baseCost gaps are within 8–12× range. ✓");
+            Debug.Log("[BaseCostGap] All building baseCost gaps are within 3–7× range. ✓");
         else
-            Debug.LogWarning("[BaseCostGap] Some gaps are out of the 8–12× range. Check warnings above.");
+            Debug.LogWarning("[BaseCostGap] Some gaps are out of the 3–7× range. Check warnings above.");
     }
 }

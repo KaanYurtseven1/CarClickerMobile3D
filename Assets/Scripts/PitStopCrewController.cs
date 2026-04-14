@@ -58,7 +58,7 @@ public class PitStopCrewController : MonoBehaviour
 
     // Level-based configuration (index = level)
     // [0] = level 0 (locked/unused), [1] = level 1, etc.
-    private static readonly float[] EfficiencyByLevel = { 0f, 0.20f, 0.30f, 0.40f, 0.55f, 0.70f, 0.85f };
+    private static readonly float[] EfficiencyByLevel = { 0f, 0.25f, 0.30f, 0.40f, 0.55f, 0.70f, 0.85f };
     private static readonly float[] CapHoursByLevel = { 0f, 2f, 3f, 4f, 6f, 8f, 12f };
 
     // Culture for double parsing
@@ -270,11 +270,17 @@ public class PitStopCrewController : MonoBehaviour
         // Fire event
         OnOfflineEarningsComputed?.Invoke(earned, offlineSeconds, usedSeconds, exitMps, level, efficiency);
 
+        // F5: Offline earnings SFX
+        if (earned > 0 && SFXManager.Instance != null)
+            SFXManager.Instance.PlayPitStopEarnings();
+
         // Grant earnings with animation (if above minimum)
         if (earned >= minimumEarnedToAnimate)
         {
             if (CurrencyManager.Instance != null)
             {
+                // Mark offline earnings so MPS display ignores the payout
+                CurrencyManager.Instance.MarkOfflineEarnings(earned);
                 CurrencyManager.Instance.AddMoneyAnimated(earned, countUpDuration, "Offline Earnings");
                 // Fire completion event after animation duration
                 StartCoroutine(FireCountUpCompleteAfterDelay(earned, countUpDuration));
@@ -285,6 +291,7 @@ public class PitStopCrewController : MonoBehaviour
             // Tiny amount, just add instantly
             if (CurrencyManager.Instance != null)
             {
+                CurrencyManager.Instance.MarkOfflineEarnings(earned);
                 CurrencyManager.Instance.AddMoney(earned);
             }
 #if UNITY_EDITOR || DEVELOPMENT_BUILD

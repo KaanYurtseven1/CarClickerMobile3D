@@ -44,6 +44,28 @@ public class GarageController : MonoBehaviour
     [SerializeField] private PartsUIController partsUI;
     [SerializeField] private BarsUIController barsUI;
 
+    [Header("─── Lock / Unlock Visuals ───")]
+    [Tooltip("Full-screen overlay shown when the active car is locked. " +
+             "Must have a CanvasGroup — this script sets blocksRaycasts = false " +
+             "so GoLeft / GoRight buttons underneath remain tappable.")]
+    [SerializeField] private GameObject lockedOverlay;
+    [Tooltip("TMP label inside LockedUI displaying the blacklist tier (e.g. 'BLACKLIST #4').")]
+    [SerializeField] private TMP_Text lockedBlacklistText;
+
+    /// <summary>Cached CanvasGroup on lockedOverlay — ensures raycasts pass through.</summary>
+    private CanvasGroup _lockedOverlayCG;
+
+    [Header("─── Customisation Slide Panels (for locked-shake) ───")]
+    [Tooltip("RectTransform of the color slide panel (shaken when car is locked).")]
+    [SerializeField] private RectTransform slideColorsRect;
+    [Tooltip("RectTransform of the sticker slide panel.")]
+    [SerializeField] private RectTransform slideStickersRect;
+    [Tooltip("RectTransform of the parts slide panel.")]
+    [SerializeField] private RectTransform slidePartsRect;
+
+    [Header("─── Shop / Economy ───")]
+    [SerializeField] private GarageShopConfig shopConfig;
+
     // ─── Glitch Transition Settings (inspector-tunable) ───
     [Header("─── Glitch Transition ───")]
     [SerializeField] private float glitchOutDur = 0.22f;
@@ -64,6 +86,19 @@ public class GarageController : MonoBehaviour
     private CarDataSO CurrentCarData => database.cars[_currentCarIndex];
     private CarCustomizer CurrentCustomizer => _customizers[_currentCarIndex];
     private CarState CurrentState => _states[_currentCarIndex];
+
+    private const string LockChainChildName = "CarLockChane";
+
+    /// <summary>True when the currently selected car is locked (not yet unlocked via Blacklist).</summary>
+    private bool IsCurrentCarLocked
+    {
+        get
+        {
+            if (GarageSaveData.Instance == null) return false;
+            CarDataSO data = CurrentCarData;
+            return data != null && !GarageSaveData.Instance.IsCarUnlocked(data.carId);
+        }
+    }
 
     // Per-car selection state (lives in memory; extend to PlayerPrefs later)
     private class CarState
@@ -87,7 +122,13 @@ public class GarageController : MonoBehaviour
         CacheCarRoots();
         BindButtons();
         BindSubControllers();
-        SelectCar(0);
+        EnsureLockedOverlayPassthrough();
+
+        int startIndex = 0;
+        if (GarageSaveData.Instance != null)
+            startIndex = Mathf.Clamp(GarageSaveData.Instance.SelectedCarIndex, 0, CarCount - 1);
+
+        SelectCar(startIndex);
     }
 
     // ══════════════════ Initialization ══════════════════
@@ -132,7 +173,15 @@ public class GarageController : MonoBehaviour
             cust.Initialize(database.globalPartKeys);
             _customizers[i] = cust;
 
+            // Restore saved state (or create blank)
             _states[i] = new CarState();
+            if (GarageSaveData.Instance != null)
+            {
+                var saved = GarageSaveData.Instance.GetStateForCar(data.carId);
+                _states[i].colorIndex = saved.colorIndex;
+                _states[i].stickerIndex = saved.stickerIndex;
+                _states[i].enabledParts = new HashSet<string>(saved.enabledParts);
+            }
 
             // All cars start inactive
             root.gameObject.SetActive(false);
@@ -152,6 +201,21 @@ public class GarageController : MonoBehaviour
         if (partsUI != null) partsUI.onPartToggled = TogglePart;
     }
 
+    /// <summary>
+    /// Ensures LockedUI has a CanvasGroup with blocksRaycasts = false so
+    /// the overlay never intercepts taps meant for GoLeft / GoRight buttons.
+    /// Customisation is already gated at the code level (BlockIfLocked).
+    /// </summary>
+    private void EnsureLockedOverlayPassthrough()
+    {
+        if (lockedOverlay == null) return;
+        _lockedOverlayCG = lockedOverlay.GetComponent<CanvasGroup>();
+        if (_lockedOverlayCG == null)
+            _lockedOverlayCG = lockedOverlay.AddComponent<CanvasGroup>();
+        _lockedOverlayCG.blocksRaycasts = false;
+        _lockedOverlayCG.interactable = false;
+    }
+
     // ══════════════════ Car Switching ══════════════════
 
     private void SelectCar(int index)
@@ -163,6 +227,16 @@ public class GarageController : MonoBehaviour
             _carRoots[_currentCarIndex].gameObject.SetActive(false);
 
         _currentCarIndex = index;
+
+        // Only persist as the "equipped" car if it is actually unlocked.
+        // Browsing a locked car is visual-only and must NOT change what
+        // MainScene uses as the active gameplay car.
+        if (GarageSaveData.Instance != null)
+        {
+            CarDataSO data = CurrentCarData;
+            if (data != null && GarageSaveData.Instance.IsCarUnlocked(data.carId))
+                GarageSaveData.Instance.SelectedCarIndex = _currentCarIndex;
+        }
 
         // Activate new
         if (_carRoots[_currentCarIndex] != null)
@@ -176,14 +250,26 @@ public class GarageController : MonoBehaviour
     {
         if (_isTransitioning) return;
         if (_currentCarIndex > 0)
+        {
+            // G1: Garage car switch SFX
+            if (SFXManager.Instance != null)
+                SFXManager.Instance.PlayGarageCarSwitch();
+
             PlayGlitchTransition(_currentCarIndex - 1);
+        }
     }
 
     private void GoRight()
     {
         if (_isTransitioning) return;
         if (_currentCarIndex < CarCount - 1)
+        {
+            // G1: Garage car switch SFX
+            if (SFXManager.Instance != null)
+                SFXManager.Instance.PlayGarageCarSwitch();
+
             PlayGlitchTransition(_currentCarIndex + 1);
+        }
     }
 
     // ══════════════════ Glitch Transition (visual-only) ══════════════════
@@ -341,13 +427,30 @@ public class GarageController : MonoBehaviour
         CarState state = CurrentState;
         if (data == null) return;
 
+        bool locked = IsCurrentCarLocked;
+
         // TMP texts
         if (carNameTMP != null) carNameTMP.text = data.displayCarName;
         if (modelNameTMP != null) modelNameTMP.text = data.displayModelName;
 
-        // Navigation buttons
+        // Navigation buttons (browsing allowed even when locked)
         if (goLeftButton != null) goLeftButton.interactable = _currentCarIndex > 0;
         if (goRightButton != null) goRightButton.interactable = _currentCarIndex < CarCount - 1;
+
+        // ── Lock overlay ──
+        if (lockedOverlay != null) lockedOverlay.SetActive(locked);
+        if (lockedBlacklistText != null && locked)
+        {
+            int tier = BlacklistManager.Instance != null
+                ? BlacklistManager.Instance.GetTierIndexForCar(data.carId)
+                : -1;
+            lockedBlacklistText.text = tier > 0
+                ? $"BLACKLIST #{tier}"
+                : "LOCKED";
+        }
+
+        // ── CarLockChane child on the 3D model ──
+        RefreshLockChain(locked);
 
         // Sub-controllers
         if (colorUI != null) colorUI.Refresh(data, state.colorIndex);
@@ -356,14 +459,103 @@ public class GarageController : MonoBehaviour
 
         // Bars
         RefreshBars();
+
+        // Affordability visuals
+        RefreshAffordability();
+    }
+
+    /// <summary>Activates or deactivates the CarLockChane child on the current car root.</summary>
+    private void RefreshLockChain(bool locked)
+    {
+        Transform root = _carRoots[_currentCarIndex];
+        if (root == null) return;
+        Transform chain = root.Find(LockChainChildName);
+        if (chain != null) chain.gameObject.SetActive(locked);
+    }
+
+    // ══════════════════ Affordability Refresh ══════════════════
+
+    /// <summary>
+    /// Keeps all main-UI item buttons at full opacity (no dimming).
+    /// Affordability is now communicated inside BuyPopupPanel (Btn_Yes disabled).
+    /// </summary>
+    private void RefreshAffordability()
+    {
+        if (shopConfig == null || GarageSaveData.Instance == null) return;
+
+        string carId = CurrentCarData != null ? CurrentCarData.carId : null;
+        if (carId == null) return;
+
+        // Colors – always bright
+        if (colorUI != null)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                bool owned = GarageSaveData.Instance.IsColorOwned(carId, i);
+                colorUI.SetButtonAffordable(i, true, owned);
+            }
+        }
+
+        // Stickers – always bright
+        if (stickerUI != null)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                bool owned = GarageSaveData.Instance.IsStickerOwned(carId, i);
+                stickerUI.SetSlotAffordable(i, true, owned);
+            }
+        }
+
+        // Parts – always bright
+        if (partsUI != null && database.globalPartKeys != null)
+        {
+            for (int i = 0; i < database.globalPartKeys.Count; i++)
+            {
+                string key = database.globalPartKeys[i];
+                bool owned = GarageSaveData.Instance.IsPartOwned(carId, key);
+                partsUI.SetPartAffordable(i, true, owned);
+            }
+        }
     }
 
     // ══════════════════ Public API (called by sub-controllers) ══════════════════
 
-    /// <summary>Changes the active car's color and refreshes skin + sticker previews.</summary>
+    /// <summary>Shake the relevant panel and block interaction when the car is locked.</summary>
+    private bool BlockIfLocked(RectTransform shakeTarget)
+    {
+        if (!IsCurrentCarLocked) return false;
+        GarageAffordabilityHelper.ShakeButton(shakeTarget);
+        return true;
+    }
+
+    /// <summary>Changes the active car's color. If not owned, opens BuyPopup for confirmation.</summary>
     public void SetColor(int colorIndex)
     {
         if (colorIndex < 0 || colorIndex >= 6) return;
+        if (BlockIfLocked(slideColorsRect)) return;
+
+        string carId = CurrentCarData.carId;
+
+        // ── Purchase gate (routes through confirmation popup) ──
+        if (!GarageSaveData.Instance.IsColorOwned(carId, colorIndex))
+        {
+            int cost = shopConfig != null ? shopConfig.GetColorCost(colorIndex) : 0;
+            if (cost > 0)
+            {
+                // Immediate click animation feedback (scales up the clicked button)
+                if (colorUI != null)
+                    colorUI.Refresh(CurrentCarData, colorIndex);
+
+                // Open popup regardless of affordability; popup handles Btn_Yes state
+                if (GarageBuyPopupController.Instance != null)
+                {
+                    GarageBuyPopupController.Instance.ShowForColor(colorIndex, cost);
+                    return;
+                }
+            }
+            // Free item (cost == 0) or no popup available → mark owned
+            GarageSaveData.Instance.MarkColorOwned(carId, colorIndex);
+        }
 
         CarState state = CurrentState;
         state.colorIndex = colorIndex;
@@ -372,6 +564,9 @@ public class GarageController : MonoBehaviour
         Material mat = CurrentCarData.GetMaterial(state.colorIndex, state.stickerIndex);
         CurrentCustomizer?.ApplySkin(mat);
 
+        // Persist
+        PersistCurrentState();
+
         // Sticker previews are colour-independent; refresh to update highlight
         if (stickerUI != null)
             stickerUI.Refresh(CurrentCarData, state.stickerIndex);
@@ -379,12 +574,37 @@ public class GarageController : MonoBehaviour
         // Update color selection visual
         if (colorUI != null)
             colorUI.Refresh(CurrentCarData, state.colorIndex);
+
+        // Refresh affordability after purchase
+        RefreshAffordability();
     }
 
-    /// <summary>Changes the active car's sticker and refreshes skin + highlight.</summary>
+    /// <summary>Changes the active car's sticker. If not owned, opens BuyPopup for confirmation.</summary>
     public void SetSticker(int stickerIndex)
     {
         if (stickerIndex < 0 || stickerIndex >= 6) return;
+        if (BlockIfLocked(slideStickersRect)) return;
+
+        string carId = CurrentCarData.carId;
+
+        // ── Purchase gate (routes through confirmation popup) ──
+        if (!GarageSaveData.Instance.IsStickerOwned(carId, stickerIndex))
+        {
+            int cost = shopConfig != null ? shopConfig.GetStickerCost(stickerIndex) : 0;
+            if (cost > 0)
+            {
+                // Immediate click animation feedback (moves highlight + emphasis)
+                if (stickerUI != null)
+                    stickerUI.SetHighlight(stickerIndex);
+
+                if (GarageBuyPopupController.Instance != null)
+                {
+                    GarageBuyPopupController.Instance.ShowForSticker(stickerIndex, cost);
+                    return;
+                }
+            }
+            GarageSaveData.Instance.MarkStickerOwned(carId, stickerIndex);
+        }
 
         CarState state = CurrentState;
         state.stickerIndex = stickerIndex;
@@ -393,54 +613,220 @@ public class GarageController : MonoBehaviour
         Material mat = CurrentCarData.GetMaterial(state.colorIndex, state.stickerIndex);
         CurrentCustomizer?.ApplySkin(mat);
 
+        // Persist
+        PersistCurrentState();
+
         // Move highlight
+        if (stickerUI != null)
+            stickerUI.SetHighlight(stickerIndex);
+
+        RefreshAffordability();
+    }
+
+    /// <summary>Toggles a mod part on/off. If not owned, attempts purchase with Gold first.
+    /// Group-exclusive: only one part per group (Camurluk, Egzoz, Kaput, Spoiler)
+    /// can be equipped at a time.</summary>
+    public void TogglePart(string partKey)
+    {
+        if (string.IsNullOrEmpty(partKey)) return;
+        if (BlockIfLocked(slidePartsRect)) return;
+
+        string carId = CurrentCarData.carId;
+        CarState state = CurrentState;
+
+        // ── Unequip (always allowed, no cost) ──
+        if (state.enabledParts.Contains(partKey))
+        {
+            state.enabledParts.Remove(partKey);
+            CurrentCustomizer?.SetPartActive(partKey, false);
+            if (partsUI != null) partsUI.UpdatePartHighlight(partKey, false);
+            PersistCurrentState();
+            RefreshBars(animate: false);
+            RefreshAffordability();
+            return;
+        }
+
+        // ── Purchase gate (routes through confirmation popup) ──
+        if (!GarageSaveData.Instance.IsPartOwned(carId, partKey))
+        {
+            double cost = shopConfig != null
+                ? shopConfig.GetPartCostByKey(partKey, database.globalPartKeys)
+                : 0;
+            if (cost > 0)
+            {
+                if (GarageBuyPopupController.Instance != null)
+                {
+                    GarageBuyPopupController.Instance.ShowForPart(partKey, cost);
+                    return;
+                }
+            }
+            GarageSaveData.Instance.MarkPartOwned(carId, partKey);
+        }
+
+        // ── Group-exclusive: remove any existing part in the same group ──
+        string group = PartStatData.GetGroupPrefix(partKey);
+        if (group != null)
+        {
+            string existing = null;
+            foreach (string key in state.enabledParts)
+            {
+                if (key.StartsWith(group)) { existing = key; break; }
+            }
+            if (existing != null)
+            {
+                state.enabledParts.Remove(existing);
+                CurrentCustomizer?.SetPartActive(existing, false);
+                if (partsUI != null) partsUI.UpdatePartHighlight(existing, false);
+            }
+        }
+
+        // ── Equip new part ──
+        state.enabledParts.Add(partKey);
+        CurrentCustomizer?.SetPartActive(partKey, true);
+        if (partsUI != null) partsUI.UpdatePartHighlight(partKey, true);
+
+        // Persist
+        PersistCurrentState();
+
+        RefreshBars(animate: false);
+        RefreshAffordability();
+    }
+
+    // ══════════════════ Popup Finalize Purchases ══════════════════
+
+    /// <summary>Finalises a color purchase: spends currency, marks owned, then applies via SetColor.</summary>
+    public void FinalizeColorPurchase(int colorIndex)
+    {
+        string carId = CurrentCarData.carId;
+        int cost = shopConfig != null ? shopConfig.GetColorCost(colorIndex) : 0;
+        if (cost > 0 && CurrencyManager.Instance != null)
+        {
+            if (!CurrencyManager.Instance.TrySpendNitroCoins(cost)) return;
+            if (GarageCurrencyUI.Instance != null) GarageCurrencyUI.Instance.RefreshNitro();
+        }
+        GarageSaveData.Instance.MarkColorOwned(carId, colorIndex);
+        SetColor(colorIndex);
+
+        // G2: Garage color purchase SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayGaragePurchase();
+    }
+
+    /// <summary>Finalises a sticker purchase: spends currency, marks owned, then applies via SetSticker.</summary>
+    public void FinalizeStickerPurchase(int stickerIndex)
+    {
+        string carId = CurrentCarData.carId;
+        int cost = shopConfig != null ? shopConfig.GetStickerCost(stickerIndex) : 0;
+        if (cost > 0 && CurrencyManager.Instance != null)
+        {
+            if (!CurrencyManager.Instance.TrySpendNitroCoins(cost)) return;
+            if (GarageCurrencyUI.Instance != null) GarageCurrencyUI.Instance.RefreshNitro();
+        }
+        GarageSaveData.Instance.MarkStickerOwned(carId, stickerIndex);
+        SetSticker(stickerIndex);
+
+        // G3: Garage sticker purchase SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayGaragePurchase();
+    }
+
+    /// <summary>Finalises a part purchase: spends currency, marks owned, then equips via TogglePart.</summary>
+    public void FinalizePartPurchase(string partKey)
+    {
+        string carId = CurrentCarData.carId;
+        double cost = shopConfig != null
+            ? shopConfig.GetPartCostByKey(partKey, database.globalPartKeys)
+            : 0;
+        if (cost > 0 && CurrencyManager.Instance != null)
+        {
+            if (!CurrencyManager.Instance.TrySpendMoney(cost)) return;
+            if (GarageCurrencyUI.Instance != null) GarageCurrencyUI.Instance.RefreshGold();
+        }
+        GarageSaveData.Instance.MarkPartOwned(carId, partKey);
+        TogglePart(partKey);
+
+        // G4: Garage part purchase SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayGaragePurchase();
+    }
+
+    // ══════════════════ Preview API (for BuyPopup) ══════════════════
+
+    /// <summary>Temporarily shows a color on the car without persisting or changing state.</summary>
+    public void PreviewColor(int colorIndex)
+    {
+        Material mat = CurrentCarData.GetMaterial(colorIndex, CurrentState.stickerIndex);
+        CurrentCustomizer?.ApplySkin(mat);
+    }
+
+    /// <summary>Temporarily shows a sticker on the car without persisting or changing state.</summary>
+    public void PreviewSticker(int stickerIndex)
+    {
+        Material mat = CurrentCarData.GetMaterial(CurrentState.colorIndex, stickerIndex);
+        CurrentCustomizer?.ApplySkin(mat);
+    }
+
+    /// <summary>Temporarily shows a part as equipped (group-exclusive hiding) without changing state.</summary>
+    public void PreviewPart(string partKey)
+    {
+        string group = PartStatData.GetGroupPrefix(partKey);
+        if (group != null)
+        {
+            foreach (string key in CurrentState.enabledParts)
+            {
+                if (key.StartsWith(group))
+                {
+                    CurrentCustomizer?.SetPartActive(key, false);
+                    break;
+                }
+            }
+        }
+        CurrentCustomizer?.SetPartActive(partKey, true);
+    }
+
+    /// <summary>Reverts any temporary preview by re-applying the real saved car state.</summary>
+    public void RevertPreview()
+    {
+        ApplyCarState();
+    }
+
+    /// <summary>
+    /// Reverts the selection UI (color scale + sticker highlight) back to
+    /// the real committed state.  Called by BuyPopupController when
+    /// a purchase is cancelled or the popup is closed without buying.
+    /// </summary>
+    public void RevertSelectionUI()
+    {
+        CarState state = CurrentState;
+        if (state == null) return;
+
+        if (colorUI != null)
+            colorUI.Refresh(CurrentCarData, state.colorIndex);
+        if (stickerUI != null)
+            stickerUI.SetHighlight(state.stickerIndex);
+    }
+
+    public void AnimateColorSelection(int colorIndex)
+    {
+        if (colorUI != null)
+            colorUI.Refresh(CurrentCarData, colorIndex);
+    }
+
+    public void AnimateStickerSelection(int stickerIndex)
+    {
         if (stickerUI != null)
             stickerUI.SetHighlight(stickerIndex);
     }
 
-    /// <summary>Toggles a mod part on/off for the active car.
-    /// Group-exclusive: only one part per group (Camurluk, Egzoz, Kaput, Spoiler)
-    /// can be equipped at a time.  Equipping a new part in the same group
-    /// automatically removes the previous one.</summary>
-    public void TogglePart(string partKey)
+    // ══════════════════ Persistence Helper ══════════════════
+
+    private void PersistCurrentState()
     {
-        if (string.IsNullOrEmpty(partKey)) return;
-
+        if (GarageSaveData.Instance == null) return;
+        CarDataSO data = CurrentCarData;
         CarState state = CurrentState;
-
-        if (state.enabledParts.Contains(partKey))
-        {
-            // ── Unequip ──
-            state.enabledParts.Remove(partKey);
-            CurrentCustomizer?.SetPartActive(partKey, false);
-            if (partsUI != null) partsUI.UpdatePartHighlight(partKey, false);
-        }
-        else
-        {
-            // ── Group-exclusive: remove any existing part in the same group ──
-            string group = PartStatData.GetGroupPrefix(partKey);
-            if (group != null)
-            {
-                string existing = null;
-                foreach (string key in state.enabledParts)
-                {
-                    if (key.StartsWith(group)) { existing = key; break; }
-                }
-                if (existing != null)
-                {
-                    state.enabledParts.Remove(existing);
-                    CurrentCustomizer?.SetPartActive(existing, false);
-                    if (partsUI != null) partsUI.UpdatePartHighlight(existing, false);
-                }
-            }
-
-            // ── Equip new part ──
-            state.enabledParts.Add(partKey);
-            CurrentCustomizer?.SetPartActive(partKey, true);
-            if (partsUI != null) partsUI.UpdatePartHighlight(partKey, true);
-        }
-
-        RefreshBars(animate: false);
+        if (data == null || state == null) return;
+        GarageSaveData.Instance.SetStateForCar(data.carId, state.colorIndex, state.stickerIndex, state.enabledParts);
     }
 
     // ══════════════════ Stats / Bars ══════════════════

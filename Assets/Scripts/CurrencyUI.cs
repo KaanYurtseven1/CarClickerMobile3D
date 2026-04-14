@@ -50,6 +50,7 @@ public class CurrencyUI : MonoBehaviour
 
     // Penalty animation state
     private bool _isPenaltyAnimating;
+    private bool _isNitroAnimating;
     private Color _moneyDefaultColor;
     private bool _moneyDefaultColorCaptured;
 
@@ -78,6 +79,9 @@ public class CurrencyUI : MonoBehaviour
         DOTween.Kill("MoneyPenaltyAnim");
         DOTween.Kill("MoneyPenaltyBlink");
         DOTween.Kill("MoneyPenaltyPunch");
+        DOTween.Kill("NitroRewardAnim");
+        DOTween.Kill("NitroRewardBlink");
+        DOTween.Kill("NitroBounce");
         DOTween.Kill("MoneySuccessRewardAnim");
         DOTween.Kill("MoneySuccessRewardBlink");
         DOTween.Kill("MoneyBufferedApplyAnim");
@@ -148,7 +152,7 @@ public class CurrencyUI : MonoBehaviour
 
             if (textMPSLine != null)
             {
-                string formatted = currentMpsDisplay.ToString("N1", moneyCulture);
+                string formatted = System.Math.Round(currentMpsDisplay).ToString("N0", moneyCulture);
                 textMPSLine.text = formatted + " per second";
             }
         }
@@ -188,7 +192,7 @@ public class CurrencyUI : MonoBehaviour
                 lastMps = currentMpsDisplay;
                 if (textMPSLine != null)
                 {
-                    string formatted = currentMpsDisplay.ToString("N1", moneyCulture);
+                    string formatted = System.Math.Round(currentMpsDisplay).ToString("N0", moneyCulture);
                     textMPSLine.text = formatted + " per second";
                 }
             }
@@ -218,7 +222,7 @@ public class CurrencyUI : MonoBehaviour
         }
 
         // --- Premium (elmas) ---
-        if (cm.nitroCoins != lastPremium)
+        if (!_isNitroAnimating && cm.nitroCoins != lastPremium)
         {
             lastPremium = cm.nitroCoins;
             if (textPremium != null)
@@ -528,6 +532,61 @@ public class CurrencyUI : MonoBehaviour
 
             lastMoneyInt = long.MinValue;
             _isPenaltyAnimating = false;
+            onComplete?.Invoke();
+        });
+    }
+
+    /// <summary>
+    /// Animates nitro coin count-up from fromValue to toValue with a blue blink + bounce.
+    /// Used after Blacklist mission reward collection.
+    /// </summary>
+    public void PlayNitroRewardAnimation(int fromValue, int toValue, float duration, Action onComplete)
+    {
+        if (textPremium == null)
+        {
+            onComplete?.Invoke();
+            return;
+        }
+
+        _isNitroAnimating = true;
+
+        DOTween.Kill("NitroRewardAnim");
+        DOTween.Kill("NitroRewardBlink");
+        DOTween.Kill("NitroBounce");
+
+        Color defaultColor = textPremium.color;
+        Color nitroBlue = new Color(0.2f, 0.7f, 1f, 1f);
+
+        Sequence blink = DOTween.Sequence().SetId("NitroRewardBlink").SetUpdate(true);
+        float blinkHalf = duration * 0.25f;
+        blink.Append(textPremium.DOColor(nitroBlue, blinkHalf));
+        blink.Append(textPremium.DOColor(defaultColor, blinkHalf));
+        blink.Append(textPremium.DOColor(nitroBlue, blinkHalf));
+        blink.Append(textPremium.DOColor(defaultColor, blinkHalf));
+
+        textPremium.rectTransform.localScale = Vector3.one;
+        textPremium.rectTransform.DOPunchScale(Vector3.one * 0.15f, duration, 8, 0.5f)
+            .SetId("NitroBounce").SetUpdate(true);
+
+        DOTween.To(() => 0f, t =>
+        {
+            int displayValue = (int)(fromValue + (toValue - fromValue) * t);
+            if (textPremium != null)
+                textPremium.text = displayValue.ToString();
+        }, 1f, duration)
+        .SetEase(Ease.OutCubic)
+        .SetId("NitroRewardAnim")
+        .SetUpdate(true)
+        .OnComplete(() =>
+        {
+            if (textPremium != null)
+            {
+                textPremium.text = toValue.ToString();
+                textPremium.color = defaultColor;
+                textPremium.rectTransform.localScale = Vector3.one;
+            }
+            lastPremium = toValue;
+            _isNitroAnimating = false;
             onComplete?.Invoke();
         });
     }

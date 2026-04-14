@@ -16,7 +16,7 @@ public class UIManager : MonoBehaviour
         }
 
         textMoney.text = $"Money: {CurrencyManager.Instance.money:0}";
-        textMPS.text = $"MPS: {CurrencyManager.Instance.moneyPerSecond:0.0}/s";
+        textMPS.text = $"MPS: {System.Math.Round(CurrencyManager.Instance.moneyPerSecond):0}/s";
 
         // Apply TurboFinger multiplier to displayed MPT
         double baseMpt = CurrencyManager.Instance.moneyPerTap;

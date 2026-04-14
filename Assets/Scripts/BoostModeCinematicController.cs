@@ -14,10 +14,10 @@ using System;
 /// 5. (Optional) Adjust tunable parameters in Inspector for desired feel
 /// 
 /// WHAT IT DOES:
-/// - When boost starts: Camera zooms in (orthographicSize), tilts, pushes forward, car shakes with power
+/// - When boost starts: Camera zooms in (fieldOfView), tilts, pushes forward, car shakes with power
 /// - When boost ends: Everything smoothly returns to original state
 /// - Creates a premium, racing-game turbo camera feel
-/// - Works with ORTHOGRAPHIC cameras (no FOV changes)
+/// - Works with PERSPECTIVE cameras (FOV-based zoom)
 /// 
 /// DEPENDENCIES:
 /// - DOTween (DG.Tweening namespace)
@@ -31,21 +31,27 @@ public class BoostModeCinematicController : MonoBehaviour
     private static void ResetStatics() { Instance = null; }
 
     // ==================== CAMERA SETTINGS ====================
-    [Header("Camera Zoom Settings (Orthographic)")]
-    [Tooltip("Target orthographic size during boost (smaller = zoomed in)")]
-    public float targetOrthoSize = 3.5f;
+    [Header("Camera Zoom Settings (Perspective)")]
+    [Tooltip("Target FOV during boost. LARGER = wider angle = feels faster. Default 75 for speed sensation.")]
+    public float targetFOV = 75f;
 
-    [Tooltip("Target camera X rotation (tilt) during boost in degrees")]
-    public float targetTiltX = 25f;
+    [Tooltip("Extra FOV added for the initial punch overshoot (settles back to targetFOV). Creates impact kick.")]
+    public float fovPunchOvershoot = 8f;
 
-    [Tooltip("How far camera pushes forward (local Z) during boost")]
-    public float cameraPushDistance = 0.6f;
+    [Tooltip("Target camera X rotation (tilt) during boost. Higher = looks more downward = ground-hugging speed feel.")]
+    public float targetTiltX = 47f;
 
-    [Tooltip("Time to ease camera into boost position (seconds)")]
-    public float cameraInTime = 0.35f;
+    [Tooltip("How far camera pulls BACK (world Z-) during boost — shows more road ahead.")]
+    public float cameraPushDistance = 1.5f;
 
-    [Tooltip("Time to ease camera back to original position (seconds)")]
-    public float cameraOutTime = 1.0f;
+    [Tooltip("Vertical camera offset during boost. NEGATIVE = lifts camera UP (recommended for centering car). Positive = dips down (pushes car above center).")]
+    public float cameraDipY = -2.3f;
+
+    [Tooltip("Time to slam camera into boost position (seconds). Shorter = more punch.")]
+    public float cameraInTime = 0.20f;
+
+    [Tooltip("Time to ease camera back to original position (seconds).")]
+    public float cameraOutTime = 0.85f;
 
     // ==================== CAR SHAKE SETTINGS ====================
     [Header("Car Shake Settings")]
@@ -73,7 +79,7 @@ public class BoostModeCinematicController : MonoBehaviour
     // ==================== ORIGINAL STATE STORAGE ====================
     private Vector3 _originalCameraLocalPos;
     private Quaternion _originalCameraLocalRot;
-    private float _defaultOrthoSize;
+    private float _defaultFOV;
     private Vector3 _defaultLocalEuler;
     private bool _defaultsCached = false;
     private Vector3 _originalCarLocalPos;
@@ -82,14 +88,17 @@ public class BoostModeCinematicController : MonoBehaviour
     // ==================== TWEEN REFERENCES ====================
     private Sequence _cameraInSequence;
     private Sequence _cameraOutSequence;
-    private Tween _orthoInTween;
-    private Tween _orthoOutTween;
+    private Tween _fovInTween;
+    private Tween _fovOutTween;
     private Tween _tiltInTween;
     private Tween _tiltOutTween;
     private Tween _carShakePosTween;
     private Tween _carShakeRotTween;
     private Tween _carResetPosTween;
     private Tween _carResetRotTween;
+
+    // Short-loop shake duration (keeps pre-computation cheap)
+    private const float ShakeLoopDuration = 1f;
 
     // ==================== STATE TRACKING ====================
     private bool _subscribedToBoostController = false;
@@ -101,6 +110,9 @@ public class BoostModeCinematicController : MonoBehaviour
     // Warning flags
     private bool _warnedMissingCamera = false;
     private bool _warnedMissingCar = false;
+
+    // Explicit car reference passed via RefreshCarReference, consumed by CacheReferences
+    private Transform _explicitCar = null;
 
     // ==================== UNITY LIFECYCLE ====================
 
@@ -255,7 +267,7 @@ public class BoostModeCinematicController : MonoBehaviour
             // Only cache defaults if not already cached (prevents overwriting during active boost/scene reload)
             if (!_defaultsCached)
             {
-                _defaultOrthoSize = _mainCamera.orthographicSize;
+                _defaultFOV = _mainCamera.fieldOfView;
                 _defaultLocalEuler = _cameraTransform.localEulerAngles;
                 _defaultsCached = true;
             }
@@ -263,7 +275,7 @@ public class BoostModeCinematicController : MonoBehaviour
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (verboseLogs)
-                Debug.Log($"[CinematicBoost] Camera cached: {_mainCamera.name}, OrthoSize={_defaultOrthoSize}, Tilt={_defaultLocalEuler.x}");
+                Debug.Log($"[CinematicBoost] Camera cached: {_mainCamera.name}, FOV={_defaultFOV}, Tilt={_defaultLocalEuler.x}");
 #endif
         }
         else if (!_warnedMissingCamera)
@@ -272,8 +284,16 @@ public class BoostModeCinematicController : MonoBehaviour
             _warnedMissingCamera = true;
         }
 
-        // Cache car
-        _carObject = GameObject.FindGameObjectWithTag("Car");
+        // Cache car (use explicit reference if provided, otherwise tag search)
+        if (_explicitCar != null)
+        {
+            _carObject = _explicitCar.gameObject;
+            _explicitCar = null; // consumed
+        }
+        else
+        {
+            _carObject = GameObject.FindGameObjectWithTag("Car");
+        }
         if (_carObject != null)
         {
             _carTransform = _carObject.transform;
@@ -290,6 +310,25 @@ public class BoostModeCinematicController : MonoBehaviour
         {
             Debug.LogWarning("[CinematicBoost] No GameObject with tag 'Car' found. Car shake disabled.");
             _warnedMissingCar = true;
+        }
+    }
+
+    // ==================== PUBLIC API ====================
+
+    /// <summary>
+    /// Forces a re-cache of the car reference. Call after switching the active car.
+    /// </summary>
+    public void RefreshCarReference(Transform activeCar = null)
+    {
+        _warnedMissingCar = false;
+        _explicitCar = activeCar;
+        CacheReferences();
+
+        // If boost is active, re-apply cinematic to the new car
+        if (_cinematicActive && _carTransform != null)
+        {
+            _originalCarLocalPos = _carTransform.localPosition;
+            _originalCarLocalRot = _carTransform.localRotation;
         }
     }
 
@@ -354,47 +393,53 @@ public class BoostModeCinematicController : MonoBehaviour
 
         _cinematicActive = true;
 
-        // Re-cache if references were lost
-        if (_cameraTransform == null || _carTransform == null)
+        // Only re-cache if references were lost (avoid Find calls every boost start)
+        if (_cameraTransform == null || _mainCamera == null || _carTransform == null)
         {
             CacheReferences();
         }
 
-        // === CAMERA ZOOM + TILT SEQUENCE (Orthographic) ===
+        // === CAMERA ZOOM + TILT SEQUENCE (Perspective FOV) ===
         if (_cameraTransform != null && _mainCamera != null)
         {
             // Store current position as original (in case we're mid-transition)
             _originalCameraLocalPos = _cameraTransform.localPosition;
 
-            // Calculate target position (push forward in local Z)
-            Vector3 targetPos = _originalCameraLocalPos + Vector3.forward * cameraPushDistance;
+            // Pull back (Z-) + dip down (Y-) — ground-level speed sensation
+            Vector3 targetPos = _originalCameraLocalPos + new Vector3(0, -cameraDipY, -cameraPushDistance);
 
-            // Create camera push sequence
+            // Create camera move sequence with impact jolt appended after the move
+            // NOTE: DOShakePosition must NOT run concurrently with DOLocalMove on the
+            // same transform — it captures the starting position and resets to it on
+            // completion, causing a visible snap. Instead we append a brief DOPunchPosition
+            // AFTER the move finishes so the captured origin equals the final targetPos.
             _cameraInSequence = DOTween.Sequence();
             _cameraInSequence.Append(
                 _cameraTransform.DOLocalMove(targetPos, cameraInTime)
-                    .SetEase(Ease.OutQuart)
+                    .SetEase(Ease.OutBack)
             );
-            _cameraInSequence.SetUpdate(true); // Ignore timescale
+            _cameraInSequence.Append(
+                _cameraTransform.DOPunchPosition(new Vector3(0.07f, 0.07f, 0f), 0.15f, 15, 0.5f)
+            );
+            _cameraInSequence.SetUpdate(true);
 
-            // Orthographic size tween (zoom in)
-            _orthoInTween = DOTween.To(
-                () => _mainCamera.orthographicSize,
-                x => _mainCamera.orthographicSize = x,
-                targetOrthoSize,
-                cameraInTime
-            ).SetEase(Ease.OutQuart).SetUpdate(true);
+            // FOV punch: briefly overshoot then settle — wide angle = speed sensation
+            float fovPunch = targetFOV + fovPunchOvershoot;
+            _fovInTween = DOTween.Sequence()
+                .Append(DOTween.To(() => _mainCamera.fieldOfView, x => _mainCamera.fieldOfView = x, fovPunch, cameraInTime * 0.35f).SetEase(Ease.OutQuart))
+                .Append(DOTween.To(() => _mainCamera.fieldOfView, x => _mainCamera.fieldOfView = x, targetFOV, cameraInTime * 0.65f).SetEase(Ease.OutSine))
+                .SetUpdate(true);
 
             // Camera tilt tween (rotation X)
             Vector3 targetEuler = _cameraTransform.localEulerAngles;
             targetEuler.x = targetTiltX;
             _tiltInTween = _cameraTransform.DOLocalRotate(targetEuler, cameraInTime)
-                .SetEase(Ease.OutQuart)
+                .SetEase(Ease.OutBack)
                 .SetUpdate(true);
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (verboseLogs)
-                Debug.Log($"[CinematicBoost] Tweening to OrthoSize={targetOrthoSize}, TiltX={targetTiltX}");
+                Debug.Log($"[CinematicBoost] Tweening to FOV={targetFOV} (punch {fovPunch}), TiltX={targetTiltX}");
 #endif
         }
 
@@ -405,29 +450,29 @@ public class BoostModeCinematicController : MonoBehaviour
             _originalCarLocalPos = _carTransform.localPosition;
             _originalCarLocalRot = _carTransform.localRotation;
 
-            // Position shake - rhythmic power feeling
-            // Loop indefinitely until boost ends
+            // Use short-duration looping shakes instead of one long shake.
+            // DOTween pre-computes the entire shake path on creation; a 16s shake
+            // with vibrato=20 generates hundreds of keyframes in one frame (= hitch).
+            // A 1s looping shake computes ~20 keyframes and loops seamlessly.
+            int loops = Mathf.CeilToInt(duration / ShakeLoopDuration);
+
             _carShakePosTween = _carTransform.DOShakePosition(
-                duration: 1f, // Shake cycle duration
+                duration: ShakeLoopDuration,
                 strength: new Vector3(shakePositionStrength, shakePositionStrength * 0.5f, shakePositionStrength * 0.3f),
                 vibrato: shakeVibrato,
                 randomness: shakeRandomness,
                 snapping: false,
-                fadeOut: false // Don't fade - we control ending manually
-            )
-            .SetLoops(-1, LoopType.Restart) // Infinite loop
-            .SetUpdate(true);
+                fadeOut: false
+            ).SetLoops(loops, LoopType.Restart).SetUpdate(true);
 
-            // Rotation shake - subtle engine rumble
+            // Rotation shake - engine rumble, looped
             _carShakeRotTween = _carTransform.DOShakeRotation(
-                duration: 1f,
+                duration: ShakeLoopDuration,
                 strength: new Vector3(shakeRotationStrength * 0.3f, shakeRotationStrength * 0.2f, shakeRotationStrength),
                 vibrato: shakeVibrato,
                 randomness: shakeRandomness * 0.7f,
                 fadeOut: false
-            )
-            .SetLoops(-1, LoopType.Restart)
-            .SetUpdate(true);
+            ).SetLoops(loops, LoopType.Restart).SetUpdate(true);
         }
     }
 
@@ -446,11 +491,11 @@ public class BoostModeCinematicController : MonoBehaviour
         {
             _originalCameraLocalPos = _cameraTransform.localPosition;
 
-            Vector3 targetPos = _originalCameraLocalPos + Vector3.forward * cameraPushDistance;
+            Vector3 targetPos = _originalCameraLocalPos + new Vector3(0, -cameraDipY, -cameraPushDistance);
             _cameraTransform.localPosition = targetPos;
 
-            // Apply orthographic size
-            _mainCamera.orthographicSize = targetOrthoSize;
+            // Apply field of view (wide angle = speed)
+            _mainCamera.fieldOfView = targetFOV;
 
             // Apply tilt
             Vector3 euler = _cameraTransform.localEulerAngles;
@@ -459,36 +504,35 @@ public class BoostModeCinematicController : MonoBehaviour
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (verboseLogs)
-                Debug.Log($"[CinematicBoost] Instant apply: OrthoSize={targetOrthoSize}, TiltX={targetTiltX}");
+                Debug.Log($"[CinematicBoost] Instant apply: FOV={targetFOV}, TiltX={targetTiltX}");
 #endif
         }
 
-        // Start car shake immediately
+        // Start car shake immediately (use remaining boost time or safe fallback)
         if (_carTransform != null)
         {
             _originalCarLocalPos = _carTransform.localPosition;
             _originalCarLocalRot = _carTransform.localRotation;
 
+            float shakeDuration = Mathf.Max(_currentBoostDuration, 5f);
+            int loops = Mathf.CeilToInt(shakeDuration / ShakeLoopDuration);
+
             _carShakePosTween = _carTransform.DOShakePosition(
-                duration: 1f,
+                duration: ShakeLoopDuration,
                 strength: new Vector3(shakePositionStrength, shakePositionStrength * 0.5f, shakePositionStrength * 0.3f),
                 vibrato: shakeVibrato,
                 randomness: shakeRandomness,
                 snapping: false,
                 fadeOut: false
-            )
-            .SetLoops(-1, LoopType.Restart)
-            .SetUpdate(true);
+            ).SetLoops(loops, LoopType.Restart).SetUpdate(true);
 
             _carShakeRotTween = _carTransform.DOShakeRotation(
-                duration: 1f,
+                duration: ShakeLoopDuration,
                 strength: new Vector3(shakeRotationStrength * 0.3f, shakeRotationStrength * 0.2f, shakeRotationStrength),
                 vibrato: shakeVibrato,
                 randomness: shakeRandomness * 0.7f,
                 fadeOut: false
-            )
-            .SetLoops(-1, LoopType.Restart)
-            .SetUpdate(true);
+            ).SetLoops(loops, LoopType.Restart).SetUpdate(true);
         }
     }
 
@@ -499,32 +543,32 @@ public class BoostModeCinematicController : MonoBehaviour
 
         _cinematicActive = false;
 
-        // === CAMERA RETURN SEQUENCE (Orthographic) ===
+        // === CAMERA RETURN SEQUENCE (Perspective FOV) ===
         if (_cameraTransform != null && _mainCamera != null)
         {
             _cameraOutSequence = DOTween.Sequence();
             _cameraOutSequence.Append(
                 _cameraTransform.DOLocalMove(_originalCameraLocalPos, cameraOutTime)
-                    .SetEase(Ease.InOutCubic)
+                    .SetEase(Ease.OutCubic)
             );
             _cameraOutSequence.SetUpdate(true);
 
-            // Orthographic size return
-            _orthoOutTween = DOTween.To(
-                () => _mainCamera.orthographicSize,
-                x => _mainCamera.orthographicSize = x,
-                _defaultOrthoSize,
+            // Field of view return
+            _fovOutTween = DOTween.To(
+                () => _mainCamera.fieldOfView,
+                x => _mainCamera.fieldOfView = x,
+                _defaultFOV,
                 cameraOutTime
-            ).SetEase(Ease.InOutCubic).SetUpdate(true);
+            ).SetEase(Ease.OutCubic).SetUpdate(true);
 
             // Tilt return
             _tiltOutTween = _cameraTransform.DOLocalRotate(_defaultLocalEuler, cameraOutTime)
-                .SetEase(Ease.InOutCubic)
+                .SetEase(Ease.OutCubic)
                 .SetUpdate(true);
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (verboseLogs)
-                Debug.Log($"[CinematicBoost] Returning to OrthoSize={_defaultOrthoSize}, Tilt={_defaultLocalEuler.x}");
+                Debug.Log($"[CinematicBoost] Returning to FOV={_defaultFOV}, Tilt={_defaultLocalEuler.x}");
 #endif
         }
 
@@ -566,10 +610,10 @@ public class BoostModeCinematicController : MonoBehaviour
             _cameraInSequence = null;
         }
 
-        if (_orthoInTween != null && _orthoInTween.IsActive())
+        if (_fovInTween != null && _fovInTween.IsActive())
         {
-            _orthoInTween.Kill();
-            _orthoInTween = null;
+            _fovInTween.Kill();
+            _fovInTween = null;
         }
 
         if (_tiltInTween != null && _tiltInTween.IsActive())
@@ -590,10 +634,10 @@ public class BoostModeCinematicController : MonoBehaviour
             _cameraOutSequence = null;
         }
 
-        if (_orthoOutTween != null && _orthoOutTween.IsActive())
+        if (_fovOutTween != null && _fovOutTween.IsActive())
         {
-            _orthoOutTween.Kill();
-            _orthoOutTween = null;
+            _fovOutTween.Kill();
+            _fovOutTween = null;
         }
 
         if (_tiltOutTween != null && _tiltOutTween.IsActive())
@@ -623,7 +667,7 @@ public class BoostModeCinematicController : MonoBehaviour
 
         if (_mainCamera != null && _defaultsCached)
         {
-            _mainCamera.orthographicSize = _defaultOrthoSize;
+            _mainCamera.fieldOfView = _defaultFOV;
             _cameraTransform.localEulerAngles = _defaultLocalEuler;
         }
 
@@ -638,7 +682,7 @@ public class BoostModeCinematicController : MonoBehaviour
 
     /// <summary>
     /// Forces a refresh of camera and car references. Call if objects are spawned dynamically.
-    /// If resetDefaults is true, will also re-cache camera defaults (orthoSize, tilt).
+    /// If resetDefaults is true, will also re-cache camera defaults (FOV, tilt).
     /// </summary>
     public void RefreshReferences(bool resetDefaults = false)
     {

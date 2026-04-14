@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.InputSystem;
 using DG.Tweening;
 using System;
 
@@ -67,12 +68,27 @@ public class RadarPopupController : MonoBehaviour
     [Tooltip("Scale at start/end of animation (< 1 = zoom-in effect).")]
     [SerializeField] private float zoomScale = 0.92f;
 
+    [Header("Tap-to-Dismiss")]
+    [Tooltip("When true, any tap while the popup is visible immediately starts the close animation.\nThe popup plays its full animOut sequence — it does not skip instantly.")]
+    [SerializeField] private bool tapToDismiss = true;
+    [Tooltip("Log to the Console when a tap-to-dismiss event fires.")]
+    [SerializeField] private bool tapToDismissDebugLog = false;
+
     /// <summary>True during the entire visible window (including fade in/out).</summary>
     public bool IsPopupOpen { get; private set; }
+
+    /// <summary>
+    /// True while the animated close is running (set by RequestClose or the auto-timer path).
+    /// Guards against duplicate close triggers during the animOut window.
+    /// </summary>
+    public bool IsClosing => _isClosing;
 
     private CanvasGroup _canvasGroup;
     private Sequence _popupSequence;
     private bool _chestShownPreviousState;
+
+    /// <summary>Prevents duplicate close triggers during the animOut window.</summary>
+    private bool _isClosing;
 
     private void Awake()
     {
@@ -118,8 +134,35 @@ public class RadarPopupController : MonoBehaviour
         }
     }
 
+    private void Update()
+    {
+        // Tap-to-dismiss: any tap while the popup is open triggers the animated close.
+        // TapInputRaycaster already blocks gameplay taps while popup is open — this is the dedicated handler.
+        if (!tapToDismiss || !IsPopupOpen || _isClosing) return;
+
+        bool tapped = false;
+#if UNITY_EDITOR
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+            tapped = true;
+        if (!tapped && Input.GetMouseButtonDown(0))
+            tapped = true;
+#else
+        if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasPressedThisFrame)
+            tapped = true;
+        if (!tapped && Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)
+            tapped = true;
+#endif
+        if (tapped)
+        {
+            if (tapToDismissDebugLog)
+                Debug.Log("[RadarPopup] Tap-to-dismiss — starting animated close.");
+            RequestClose();
+        }
+    }
+
     private void OnDestroy()
     {
+        _isClosing = false;
         KillSequence();
         RestoreChestShown();
         if (Instance == this) Instance = null;
@@ -127,6 +170,7 @@ public class RadarPopupController : MonoBehaviour
 
     private void OnDisable()
     {
+        _isClosing = false;
         KillSequence();
         RestoreChestShown();
     }
@@ -147,8 +191,15 @@ public class RadarPopupController : MonoBehaviour
     {
         if (popupRoot == null) return;
 
+        // P10: Radar popup snapshot SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayRadarPopup();
+
         // Kill any previous popup animation to avoid overlap
         KillSequence();
+
+        // Reset close state so a fresh popup is fully interactive
+        _isClosing = false;
 
         // Capture snapshot with side-based camera pose
         CaptureFrame(side);
@@ -187,27 +238,46 @@ public class RadarPopupController : MonoBehaviour
             _popupSequence.Append(_canvasGroup.DOFade(0f, animOut).SetEase(Ease.InCubic));
         _popupSequence.Join(popupRoot.transform.DOScale(zoomScale, animOut).SetEase(Ease.InCubic));
 
-        // Phase 4: Cleanup
-        _popupSequence.OnComplete(() =>
-        {
-            popupRoot.SetActive(false);
-            popupRoot.transform.localScale = Vector3.one;
-            RestoreChestShown();
-            IsPopupOpen = false;
-            _popupSequence = null;
-
-            // Notify subscribers that the radar popup has fully closed
-            OnRadarPopupClosed?.Invoke();
-        });
+        // Phase 4: Cleanup — shared path with RequestClose()
+        _popupSequence.OnComplete(FinishClose);
 
         _popupSequence.SetUpdate(true); // unscaled time so pauses don't break it
     }
 
     /// <summary>
-    /// Immediately closes the popup (kills animation, restores state).
+    /// Requests an animated close of the popup.
+    /// Safe to call at any time — does nothing if the popup is not open or is already closing.
+    /// Uses the same animOut fade+zoom-out as the auto-timer path.
+    /// OnRadarPopupClosed fires once the animation completes.
+    /// </summary>
+    public void RequestClose()
+    {
+        if (!IsPopupOpen || _isClosing) return;
+
+        _isClosing = true;
+
+        // Kill the current sequence (stops fade-in or hold timer)
+        KillSequence();
+
+        // Build the close-only sequence: fade+zoom OUT → FinishClose
+        _popupSequence = DOTween.Sequence();
+
+        if (_canvasGroup != null)
+            _popupSequence.Append(_canvasGroup.DOFade(0f, animOut).SetEase(Ease.InCubic));
+        _popupSequence.Join(popupRoot.transform.DOScale(zoomScale, animOut).SetEase(Ease.InCubic));
+
+        _popupSequence.OnComplete(FinishClose);
+        _popupSequence.SetUpdate(true);
+    }
+
+    /// <summary>
+    /// Immediately closes the popup without animation (kills animation, restores state).
+    /// Fires OnRadarPopupClosed if the popup was open.
+    /// Prefer RequestClose() for smooth animated dismissal.
     /// </summary>
     public void Close()
     {
+        _isClosing = false;
         KillSequence();
 
         if (popupRoot != null)
@@ -229,6 +299,25 @@ public class RadarPopupController : MonoBehaviour
     }
 
     // ==================== INTERNAL ====================
+
+    /// <summary>
+    /// Shared cleanup called at the end of any close animation (auto-timer or RequestClose).
+    /// Fires OnRadarPopupClosed exactly once per popup open/close cycle.
+    /// </summary>
+    private void FinishClose()
+    {
+        if (popupRoot != null)
+        {
+            popupRoot.SetActive(false);
+            popupRoot.transform.localScale = Vector3.one;
+        }
+        RestoreChestShown();
+        IsPopupOpen = false;
+        _isClosing = false;
+        _popupSequence = null;
+
+        OnRadarPopupClosed?.Invoke();
+    }
 
     private void KillSequence()
     {

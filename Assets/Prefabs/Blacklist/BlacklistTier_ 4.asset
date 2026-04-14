@@ -1,0 +1,110 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5f9e9b74adb1ef146a92681d7b426532, type: 3}
+  m_Name: BlacklistTier_ 4
+  m_EditorClassIdentifier: Assembly-CSharp::BlacklistTierSO
+  tierIndex: 2
+  tierDisplayName: BLACKLIST #2
+  carName: JMP-PAGANI
+  carImage: {fileID: 0}
+  rewardCar: {fileID: 11400000, guid: 14e7bea1932568540b408422a7b5f921, type: 2}
+  missions:
+  - missionType: 0
+    mode: 0
+    targetValue: 500000000000
+    description: Earn 500B gold
+    icon: {fileID: 21300000, guid: d6145517aee12374b938124e8890acc5, type: 3}
+    reward:
+      goldAmount: 100000000000
+      nitroAmount: 0
+      popularityReset: 0
+      heatReset: 0
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 0
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: 9a09981d25f290d4ab5d252ac8f5c195, type: 3}
+      rewardDisplayText: +100B Gold
+  - missionType: 1
+    mode: 0
+    targetValue: 500
+    description: Earn 500 nitro coins
+    icon: {fileID: 21300000, guid: 2352d7eb7371295468f6ac4c87ed9166, type: 3}
+    reward:
+      goldAmount: 0
+      nitroAmount: 40
+      popularityReset: 0
+      heatReset: 0
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 0
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: 0afa810927befb045a09d5411a485867, type: 3}
+      rewardDisplayText: +40 Nitro
+  - missionType: 2
+    mode: 0
+    targetValue: 200
+    description: Defuse 200 radars
+    icon: {fileID: 21300000, guid: 1b3d42769238cb94493402b8faa31efb, type: 3}
+    reward:
+      goldAmount: 0
+      nitroAmount: 15
+      popularityReset: 1
+      heatReset: 1
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 0
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: faf4ff8ed194b3145b3b4b963cd28e5e, type: 3}
+      rewardDisplayText: Pop+Heat Reset & +15 Nitro
+  - missionType: 3
+    mode: 1
+    targetValue: 20
+    description: Own 20 buildings
+    icon: {fileID: 21300000, guid: bf6a18523c1bd5d4f923ab553235e062, type: 3}
+    reward:
+      goldAmount: 150000000000
+      nitroAmount: 0
+      popularityReset: 0
+      heatReset: 0
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 0
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: de8ce0bb1e237604b870dd358540c6dd, type: 3}
+      rewardDisplayText: +150B Gold
+  - missionType: 11
+    mode: 0
+    targetValue: 20
+    description: 'Use turbo 20 times '
+    icon: {fileID: 21300000, guid: 00ae7cac6ca55d34fa48b7113a17b45d, type: 3}
+    reward:
+      goldAmount: 0
+      nitroAmount: 0
+      popularityReset: 0
+      heatReset: 0
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 10
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: 9f21b1d0ae9ea3b4188210b2ff477a89, type: 3}
+      rewardDisplayText: +10 Card Progress

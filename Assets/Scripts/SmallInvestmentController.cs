@@ -234,4 +234,9 @@ public class SmallInvestmentController : MonoBehaviour
             ? CardManager.Instance.GetCardLevel(CardType.SmallInvestment)
             : 0;
     }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+    }
 }

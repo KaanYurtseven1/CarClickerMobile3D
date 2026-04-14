@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using DG.Tweening;
 
 public class ChestOpenSceneController : MonoBehaviour
@@ -32,8 +33,9 @@ public class ChestOpenSceneController : MonoBehaviour
         Reveal_Money,       // money card parked, texts shown  wait for tap 4
         Reveal_Nitro,       // tap 4 result  wait for tap 5
         Reveal_Card,        // tap 5 result  wait for tap 6
-        Summary,            // tap 6 result  wait for tap 7
-        Exit                // tap 7 fires grant + scene change
+        Reveal_Sticker,     // tap 6 result (Rare/Legendary only)  wait for tap 7
+        Summary,            // tap 6 or 7 result  wait for final tap
+        Exit                // final tap fires grant + scene change
     }
 
     // 
@@ -44,6 +46,9 @@ public class ChestOpenSceneController : MonoBehaviour
     [SerializeField] private Camera cam;
     [SerializeField] private Transform spawnPoint;
     [SerializeField] private GameObject chestPrefab;
+    [SerializeField] private GameObject commonChestPrefab;
+    [SerializeField] private GameObject rareChestPrefab;
+    [SerializeField] private GameObject legendaryChestPrefab;
 
     [Header("Lid Settings")]
     [SerializeField] private Transform lidBone;
@@ -56,15 +61,24 @@ public class ChestOpenSceneController : MonoBehaviour
     [SerializeField] private bool useRuntimePivotFix = false;
     [SerializeField] private Vector3 pivotOffset = new Vector3(0, 0.5f, -0.5f);
 
-    [Header("MPS-Based Chest Gold (replaces old multiplier system)")]
-    [Tooltip("Minimum MPS multiplier for chest gold reward.")]
-    [SerializeField] private float chestGoldMPSMin = 30f;
-    [Tooltip("Maximum MPS multiplier for chest gold reward.")]
-    [SerializeField] private float chestGoldMPSMax = 120f;
+    [Header("Money-Based Chest Gold")]
+    [Tooltip("Minimum percentage of current money for chest gold reward (0.05 = 5%).")]
+    [SerializeField] private float chestGoldPercentMin = 0.05f;
+    [Tooltip("Maximum percentage of current money for chest gold reward (0.15 = 15%).")]
+    [SerializeField] private float chestGoldPercentMax = 0.15f;
+
+    [Header("Nitro-Based Chest Nitro")]
+    [Tooltip("Minimum percentage of current nitro for chest nitro reward (0.05 = 5%).")]
+    [SerializeField] private float chestNitroPercentMin = 0.05f;
+    [Tooltip("Maximum percentage of current nitro for chest nitro reward (0.20 = 20%).")]
+    [SerializeField] private float chestNitroPercentMax = 0.20f;
 
     [Header("Reward Reveal")]
     [Tooltip("ChestRewardRevealController on RewardRevealRoot")]
     [SerializeField] private ChestRewardRevealController revealController;
+
+    [Tooltip("Drag the GarageDatabase SO here (Assets/SO/Garage/GarageDatabase). Required for sticker rewards.")]
+    [SerializeField] private GarageDatabaseSO garageDatabase;
 
     [Tooltip("WorldRewardCardPrefab_TMP prefab")]
     [SerializeField] private GameObject worldCardPrefab;
@@ -92,6 +106,12 @@ public class ChestOpenSceneController : MonoBehaviour
     [SerializeField] private float lidOpenDuration = 0.35f;
     [SerializeField] private Ease lidEase = Ease.OutCubic;
 
+    [Header("Background per Chest Type")]
+    [SerializeField] private Image backgroundImage;
+    [SerializeField] private Sprite bgCommon;
+    [SerializeField] private Sprite bgRare;
+    [SerializeField] private Sprite bgLegendary;
+
     // 
     //  RUNTIME STATE
     // 
@@ -112,6 +132,9 @@ public class ChestOpenSceneController : MonoBehaviour
 
     private ChestRewardPackage rewardPackage;
 
+    // Resolved chest type for per-type reward scaling
+    private ChestType cachedChestType = ChestType.Common;
+
     // Bug #7: Cached chest data (read + cleared from PlayerPrefs on scene entry)
     private ChestInventoryManager.ChestData cachedChestData;
 
@@ -121,6 +144,22 @@ public class ChestOpenSceneController : MonoBehaviour
     [SerializeField] private float animationTimeout = 4f;
     private float animStartTime;
     private Phase animTargetPhase;
+
+    // 
+    //  BACKGROUND
+    // 
+
+    private void ApplyBackground()
+    {
+        if (backgroundImage == null) return;
+        backgroundImage.sprite = cachedChestType switch
+        {
+            ChestType.Common => bgCommon,
+            ChestType.Rare => bgRare,
+            ChestType.Legendary => bgLegendary,
+            _ => bgCommon
+        };
+    }
 
     // 
     //  LIFECYCLE
@@ -142,18 +181,29 @@ public class ChestOpenSceneController : MonoBehaviour
     {
         if (cam == null) cam = Camera.main;
 
-        DLog($"Start ENTRY — ChestInventoryManager.Instance={(ChestInventoryManager.Instance != null ? ChestInventoryManager.Instance.name + "#" + ChestInventoryManager.Instance.GetInstanceID() : "NULL")}");
+        // ── Ensure critical managers are alive (bootstrap safety net) ──
+        ChestSessionManager.EnsureInstance();
+        ChestInventoryManager.EnsureInstance();
 
-        // ── Bug #7 fix: read pending chest ONCE, cache in-memory, clear PlayerPrefs key immediately ──
-        cachedChestData = ReadAndClearPendingChest();
+        DLog($"Start ENTRY — ChestSessionManager.Instance={(ChestSessionManager.Instance != null ? "EXISTS" : "NULL")} ChestInventoryManager.Instance={(ChestInventoryManager.Instance != null ? ChestInventoryManager.Instance.name + "#" + ChestInventoryManager.Instance.GetInstanceID() : "NULL")}");
+
+        // ── Phase 1 Hardening: Primary handoff via runtime session, PlayerPrefs as fallback ──
+        cachedChestData = ResolveChestData();
         if (cachedChestData == null)
         {
-            Debug.LogError("[ChestOpenScene] No pending chest data on scene entry! Returning to Main safely.");
-            DWarn("Start — cachedChestData is NULL after ReadAndClearPendingChest, loading Main");
+            Debug.LogError("[ChestOpenScene] No chest data available (neither session nor PlayerPrefs)! Returning to Main safely.");
+            DWarn("Start — cachedChestData is NULL, loading Main");
             SceneManager.LoadScene("Main");
             return;
         }
-        DLog($"Start — cachedChestData OK: name='{cachedChestData.chestName}' cardReward={cachedChestData.cardReward}");
+        DLog($"Start — cachedChestData OK: name='{cachedChestData.chestName}' chestType={cachedChestData.chestType}");
+
+        // Cache the chest type for reward scaling
+        cachedChestType = cachedChestData.chestType;
+        ApplyBackground();
+        // Clear legacy pending key (no longer needed for the new flow, but clean up)
+        if (ChestInventoryManager.Instance != null)
+            ChestInventoryManager.Instance.ClearPendingOpenChest();
 
         //  Validation 
         if (revealController == null)
@@ -168,6 +218,74 @@ public class ChestOpenSceneController : MonoBehaviour
     }
 
     /// <summary>
+    /// Resolves chest data using the best available source:
+    ///   1. Runtime session from ChestSessionManager (primary, survives scene load)
+    ///   2. Persisted session JSON read directly from PlayerPrefs (manager-independent)
+    ///   3. Legacy pending chest key via ChestInventoryManager
+    ///   4. Legacy pending chest key read directly from PlayerPrefs (last resort)
+    /// </summary>
+    private ChestInventoryManager.ChestData ResolveChestData()
+    {
+        // 1) Runtime session (best case — normal flow)
+        if (ChestSessionManager.Instance != null && ChestSessionManager.Instance.HasActiveSession)
+        {
+            var session = ChestSessionManager.Instance.ActiveSession;
+            if (session.chestData != null)
+            {
+                Debug.Log($"[ChestOpenScene] Chest data resolved from RUNTIME SESSION: '{session.chestData.chestName}'");
+                return session.chestData;
+            }
+        }
+
+        // 2) Persisted session JSON (manager may exist but have no in-memory session,
+        //    or may have been freshly bootstrapped — the session was persisted to PlayerPrefs)
+        DLog("ResolveChestData — no runtime session, trying persisted session JSON");
+        var fromSession = TryLoadSessionFromPlayerPrefs();
+        if (fromSession != null)
+        {
+            // If ChestSessionManager exists but has no active session, restore it
+            if (ChestSessionManager.Instance != null && !ChestSessionManager.Instance.HasActiveSession)
+            {
+                ChestSessionManager.Instance.RestoreSessionFromPersisted(fromSession);
+                Debug.Log($"[ChestOpenScene] Restored persisted session into ChestSessionManager: '{fromSession.chestData.chestName}'");
+            }
+            return fromSession.chestData;
+        }
+
+        // 3) Legacy pending key via manager
+        DLog("ResolveChestData — no persisted session, trying legacy PlayerPrefs key");
+        return ReadAndClearPendingChest();
+    }
+
+    /// <summary>
+    /// Reads the persisted ChestOpeningSession directly from PlayerPrefs.
+    /// Does NOT require ChestSessionManager or ChestInventoryManager to be alive.
+    /// </summary>
+    private ChestOpeningSession TryLoadSessionFromPlayerPrefs()
+    {
+        const string key = "Save_ChestOpeningSession";
+        if (!PlayerPrefs.HasKey(key)) return null;
+
+        string json = PlayerPrefs.GetString(key, "");
+        if (string.IsNullOrEmpty(json)) return null;
+
+        try
+        {
+            var session = JsonUtility.FromJson<ChestOpeningSession>(json);
+            if (session != null && session.chestData != null)
+            {
+                Debug.Log($"[ChestOpenScene] Loaded persisted session from PlayerPrefs: id={session.sessionId} chest='{session.chestData.chestName}' committed={session.rewardsCommitted}");
+                return session;
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[ChestOpenScene] Failed to parse persisted session: {e.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Bug #7: Read the pending chest from PlayerPrefs, cache it, and immediately
     /// delete the key so it can never leak into a future chest open if the app
     /// crashes or is force-quit mid-reveal.
@@ -176,28 +294,55 @@ public class ChestOpenSceneController : MonoBehaviour
     {
         DLog($"ReadAndClearPendingChest ENTRY — ChestInventoryManager.Instance={(ChestInventoryManager.Instance != null ? "EXISTS (" + ChestInventoryManager.Instance.name + "#" + ChestInventoryManager.Instance.GetInstanceID() + ")" : "NULL")}");
 
-        if (ChestInventoryManager.Instance == null)
+        // Try via manager first (has proper logging and key management)
+        if (ChestInventoryManager.Instance != null)
         {
-            Debug.LogError("[ChestOpenScene] ChestInventoryManager.Instance is NULL!");
-            if (debugLogs)
+            DLog("ReadAndClearPendingChest — calling GetPendingOpenChest()");
+            var data = ChestInventoryManager.Instance.GetPendingOpenChest();
+            DLog($"ReadAndClearPendingChest — GetPendingOpenChest returned {(data != null ? $"'{data.chestName}'" : "NULL")}");
+            if (data != null)
             {
-                DWarn("ReadAndClearPendingChest — Instance is NULL, printing stack trace for diagnosis");
-                Debug.LogWarning(System.Environment.StackTrace);
+                ChestInventoryManager.Instance.ClearPendingOpenChest();
+                PlayerPrefs.Save();
+                Debug.Log($"[ChestOpenScene] Pending chest cached & PlayerPrefs key cleared: '{data.chestName}' type={data.chestType}");
             }
-            return null;
+            return data;
         }
 
-        DLog("ReadAndClearPendingChest — calling GetPendingOpenChest()");
-        var data = ChestInventoryManager.Instance.GetPendingOpenChest();
-        DLog($"ReadAndClearPendingChest — GetPendingOpenChest returned {(data != null ? $"'{data.chestName}'" : "NULL")}");
-        if (data != null)
+        // Last resort: read legacy key directly from PlayerPrefs (no manager needed)
+        Debug.LogWarning("[ChestOpenScene] ChestInventoryManager.Instance is NULL — reading legacy key directly from PlayerPrefs.");
+        return ReadLegacyPendingChestDirect();
+    }
+
+    /// <summary>
+    /// Reads the legacy pending chest key directly from PlayerPrefs without
+    /// depending on ChestInventoryManager. Last-resort fallback.
+    /// </summary>
+    private ChestInventoryManager.ChestData ReadLegacyPendingChestDirect()
+    {
+        const string key = "Save_PendingOpenChest";
+        if (!PlayerPrefs.HasKey(key)) return null;
+
+        string json = PlayerPrefs.GetString(key, "");
+        if (string.IsNullOrEmpty(json)) return null;
+
+        try
         {
-            // Clear immediately — this is the critical fix for Bug #7.
-            ChestInventoryManager.Instance.ClearPendingOpenChest();
-            PlayerPrefs.Save(); // force flush to disk
-            Debug.Log($"[ChestOpenScene] Pending chest cached & PlayerPrefs key cleared: '{data.chestName}' cardReward={data.cardReward}");
+            var data = JsonUtility.FromJson<ChestInventoryManager.ChestData>(json);
+            if (data != null)
+            {
+                // Clear immediately to prevent double-use
+                PlayerPrefs.DeleteKey(key);
+                PlayerPrefs.Save();
+                Debug.Log($"[ChestOpenScene] Legacy pending chest read directly from PlayerPrefs: '{data.chestName}'");
+                return data;
+            }
         }
-        return data;
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[ChestOpenScene] Failed to parse legacy pending chest: {e.Message}");
+        }
+        return null;
     }
 
     // 
@@ -206,13 +351,21 @@ public class ChestOpenSceneController : MonoBehaviour
 
     private void SpawnChest()
     {
-        if (spawnPoint == null || chestPrefab == null)
+        if (spawnPoint == null)
         {
-            Debug.LogError("[ChestOpenScene] spawnPoint or chestPrefab missing!");
+            Debug.LogError("[ChestOpenScene] spawnPoint missing!");
             return;
         }
 
-        chestGO = Instantiate(chestPrefab, spawnPoint.position, spawnPoint.rotation);
+        // Select prefab by chest type, fall back to generic chestPrefab
+        GameObject prefab = GetPrefabForType(cachedChestType);
+        if (prefab == null)
+        {
+            Debug.LogError("[ChestOpenScene] No chest prefab available!");
+            return;
+        }
+
+        chestGO = Instantiate(prefab, spawnPoint.position, spawnPoint.rotation);
         chestTr = chestGO.transform;
         basePos = chestTr.position;
         baseScale = chestTr.localScale;
@@ -253,6 +406,23 @@ public class ChestOpenSceneController : MonoBehaviour
     }
 
     // 
+    //  CHEST PREFAB SELECTION
+    // 
+
+    private GameObject GetPrefabForType(ChestType type)
+    {
+        switch (type)
+        {
+            case ChestType.Rare:
+                return rareChestPrefab != null ? rareChestPrefab : chestPrefab;
+            case ChestType.Legendary:
+                return legendaryChestPrefab != null ? legendaryChestPrefab : chestPrefab;
+            default:
+                return commonChestPrefab != null ? commonChestPrefab : chestPrefab;
+        }
+    }
+
+    // 
     //  INTRO ANIM
     // 
 
@@ -261,6 +431,9 @@ public class ChestOpenSceneController : MonoBehaviour
         if (chestTr == null) return;
         phase = Phase.Intro;
         chestTr.DOKill(true);
+
+        // C1: Chest drop intro SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayChestDrop();
 
         chestTr.position = basePos + Vector3.down * introStartYOffset;
         chestTr.localScale = baseScale * introStartScale;
@@ -276,7 +449,24 @@ public class ChestOpenSceneController : MonoBehaviour
             phase = Phase.Closed_TapToOpen;
             tapCount = 0;
             Debug.Log("[ChestOpenScene] Phase -> Closed_TapToOpen");
+            StartIdleMotion();
         });
+    }
+
+    /// <summary>Gentle idle hover: Y oscillation + slow Y rotation. Killed on first tap feedback.</summary>
+    private void StartIdleMotion()
+    {
+        if (chestTr == null) return;
+        chestTr.DOMoveY(basePos.y + 0.08f, 1.2f)
+            .SetEase(Ease.InOutSine)
+            .SetLoops(-1, LoopType.Yoyo)
+            .SetId("ChestIdle")
+            .SetLink(gameObject, LinkBehaviour.KillOnDestroy);
+        chestTr.DORotate(new Vector3(0, 360, 0), 12f, RotateMode.FastBeyond360)
+            .SetEase(Ease.Linear)
+            .SetLoops(-1, LoopType.Restart)
+            .SetId("ChestIdle")
+            .SetLink(gameObject, LinkBehaviour.KillOnDestroy);
     }
 
     // 
@@ -293,9 +483,9 @@ public class ChestOpenSceneController : MonoBehaviour
             return;
         }
 
-        if (phase == Phase.Intro || phase == Phase.LidOpening) return;
+        // Intro: fully non-interactive
+        if (phase == Phase.Intro) return;
         if (cam == null) return;
-        if (isAnimating) return;
 
         bool tapDetected = false;
         Vector2 screenPos = Vector2.zero;
@@ -309,6 +499,22 @@ public class ChestOpenSceneController : MonoBehaviour
 
         if (!tapDetected) return;
 
+        // ── Spam-tap: skip lid opening instantly ──
+        if (phase == Phase.LidOpening)
+        {
+            // Complete the lid rotation (fires OnLidOpened → computes+commits rewards)
+            if (lidBone != null) lidBone.DOComplete();
+            // After OnLidOpened, isAnimating is true (money reveal started).
+            // Fall through to the isAnimating skip below.
+        }
+
+        // ── Spam-tap: skip current animation and advance phase ──
+        if (isAnimating)
+        {
+            SkipCurrentAnimation();
+            // phase is now advanced, isAnimating is false — fall through
+        }
+
         // Post-lid phases: accept any screen tap (no raycast needed)
         if (phase >= Phase.Reveal_Money)
         {
@@ -317,7 +523,8 @@ public class ChestOpenSceneController : MonoBehaviour
         }
 
         // Pre-lid: require raycast on chest
-        TryTap(screenPos);
+        if (phase == Phase.Closed_TapToOpen)
+            TryTap(screenPos);
     }
 
     private void TryTap(Vector2 screenPos)
@@ -356,6 +563,8 @@ public class ChestOpenSceneController : MonoBehaviour
         if (phase == Phase.Reveal_Money)
         {
             PlayTapFeedback(openedFeel: true);
+            // C5: Nitro reveal SFX
+            if (SFXManager.Instance != null) SFXManager.Instance.PlayRewardNitro();
             BeginAnimating(Phase.Reveal_Nitro);
             Debug.Log($"[ChestOpenScene] TAP #{globalTapCount} -> RevealNitro");
             Sprite nitroIcon = revealController != null ? revealController.NitroSprite : null;
@@ -374,11 +583,15 @@ public class ChestOpenSceneController : MonoBehaviour
         if (phase == Phase.Reveal_Nitro)
         {
             PlayTapFeedback(openedFeel: true);
+            // C6: Card reveal SFX
+            if (SFXManager.Instance != null) SFXManager.Instance.PlayRewardCard();
             BeginAnimating(Phase.Reveal_Card);
             Debug.Log($"[ChestOpenScene] TAP #{globalTapCount} -> RevealCard");
             // Use full card art on CardBG renderer; format is "Nx" (e.g. "4x")
             Sprite cardBGSprite = rewardPackage?.cardArtSprite;
             string cardLabel = rewardPackage != null ? $"{rewardPackage.cardCopies}x" : "";
+            Debug.Log($"[ChestOpenScene] RevealCard: bgSprite={(cardBGSprite != null ? cardBGSprite.name : "NULL")} " +
+                      $"label='{cardLabel}' displayName='{rewardPackage?.cardDisplayName}' rarity={rewardPackage?.cardRarity}");
             SafeFadeOutAndSwap(null, cardLabel, () =>   // icon=null: CardBG mode handles visuals
             {
                 if (revealController != null)
@@ -389,9 +602,51 @@ public class ChestOpenSceneController : MonoBehaviour
             return;
         }
 
-        //  TAP 6  (Reveal_Card  Summary)  NO hop 
+        //  TAP 6  (Reveal_Card  Sticker or Summary)  NO hop 
         if (phase == Phase.Reveal_Card)
         {
+            // If sticker reward exists, go to Reveal_Sticker; otherwise skip to Summary
+            if (rewardPackage != null && rewardPackage.hasStickerReward)
+            {
+                PlayTapFeedback(openedFeel: true);
+                // C7: Sticker reveal SFX
+                if (SFXManager.Instance != null) SFXManager.Instance.PlayRewardSticker();
+                BeginAnimating(Phase.Reveal_Sticker);
+                Debug.Log($"[ChestOpenScene] TAP #{globalTapCount} -> RevealSticker");
+                SafeFadeOutAndSwap(revealController != null ? revealController.StickerSprite : null,
+                    rewardPackage.stickerCarDisplayName ?? "Sticker", () =>
+                {
+                    if (revealController != null)
+                        revealController.ShowStickerInfo(() => EndAnim(Phase.Reveal_Sticker));
+                    else
+                        EndAnim(Phase.Reveal_Sticker);
+                });
+            }
+            else
+            {
+                // C8: Summary shown SFX (no sticker path)
+                if (SFXManager.Instance != null) SFXManager.Instance.PlayChestSummary();
+                BeginAnimating(Phase.Summary);
+                Debug.Log($"[ChestOpenScene] TAP #{globalTapCount} -> Summary (no sticker)");
+                SafeFadeOut(() =>
+                {
+                    HideActiveWorldCard(() =>
+                    {
+                        if (revealController != null)
+                            revealController.ShowSummary(() => EndAnim(Phase.Summary));
+                        else
+                            EndAnim(Phase.Summary);
+                    });
+                });
+            }
+            return;
+        }
+
+        //  TAP 7  (Reveal_Sticker  Summary)  NO hop 
+        if (phase == Phase.Reveal_Sticker)
+        {
+            // C8: Summary shown SFX
+            if (SFXManager.Instance != null) SFXManager.Instance.PlayChestSummary();
             BeginAnimating(Phase.Summary);
             Debug.Log($"[ChestOpenScene] TAP #{globalTapCount} -> Summary");
             SafeFadeOut(() =>
@@ -407,9 +662,11 @@ public class ChestOpenSceneController : MonoBehaviour
             return;
         }
 
-        //  TAP 7  (Summary  Exit) 
+        //  TAP 7 or 8  (Summary  Exit) 
         if (phase == Phase.Summary)
         {
+            // C9: Exit swoosh SFX
+            if (SFXManager.Instance != null) SFXManager.Instance.PlayChestExit();
             Debug.Log($"[ChestOpenScene] TAP #{globalTapCount} -> EXIT");
             FinishAndReturnToMain();
             return;
@@ -454,24 +711,16 @@ public class ChestOpenSceneController : MonoBehaviour
         Debug.LogError($"[ChestOpenScene] WATCHDOG TRIGGERED: isAnimating stuck for >{animationTimeout}s! " +
                        $"phase={phase} targetPhase={animTargetPhase} globalTap={globalTapCount}");
 
-        // Kill all active tweens for this scene
-        if (chestTr != null) chestTr.DOKill();
-        if (lidBone != null) lidBone.DOKill();
-        if (activeWorldCard != null)
-        {
-            activeWorldCard.transform.DOKill();
-            Destroy(activeWorldCard.gameObject);
-            activeWorldCard = null;
-        }
-        if (revealController != null) DOTween.Kill(revealController);
+        KillAllSceneTweens();
 
-        // If rewards haven't been computed yet, bail to Main without granting
+        // If rewards haven't been computed yet, bail to Main without granting.
+        // Session recovery will revert chest to ReadyToOpen on next launch.
         if (rewardPackage == null)
         {
-            Debug.LogError("[ChestOpenScene] WATCHDOG: No rewardPackage — returning to Main without rewards.");
+            Debug.LogError("[ChestOpenScene] WATCHDOG: No rewardPackage — returning to Main. Session recovery will handle the chest.");
             isAnimating = false;
             phase = Phase.Exit;
-            SceneManager.LoadScene("Main");
+            FinishAndReturnToMain();
             return;
         }
 
@@ -483,6 +732,48 @@ public class ChestOpenSceneController : MonoBehaviour
 
         Debug.LogWarning($"[ChestOpenScene] WATCHDOG: Recovering to phase {recovery}");
         EndAnim(recovery);
+    }
+
+    /// <summary>
+    /// Kills every DOTween in the chest-open scene.
+    /// Shared by SkipCurrentAnimation and WatchdogRecover.
+    /// </summary>
+    private void KillAllSceneTweens()
+    {
+        if (chestTr != null) chestTr.DOKill();
+        if (lidBone != null) lidBone.DOKill();
+        DOTween.Kill(this);
+
+        if (revealController != null)
+            revealController.SnapKillAllTweens();
+
+        if (activeWorldCard != null)
+        {
+            activeWorldCard.transform.DOKill();
+            DOTween.Kill(activeWorldCard);
+            Destroy(activeWorldCard.gameObject);
+            activeWorldCard = null;
+        }
+    }
+
+    /// <summary>
+    /// Instantly completes the current animation transition.
+    /// Kills all running tweens, cleans up, resets chest visuals, and advances phase.
+    /// Called when the player taps during an animation (spam-tap support).
+    /// </summary>
+    private void SkipCurrentAnimation()
+    {
+        Debug.Log($"[ChestOpenScene] SPAM-TAP SKIP: killing tweens, advancing {phase}→{animTargetPhase}");
+        KillAllSceneTweens();
+
+        // Reset chest transform so the next PlayTapFeedback starts from a clean state
+        if (chestTr != null)
+        {
+            chestTr.position = basePos;
+            chestTr.localScale = baseScale;
+        }
+
+        EndAnim(animTargetPhase);
     }
 
     /// <summary>
@@ -518,7 +809,11 @@ public class ChestOpenSceneController : MonoBehaviour
     private void PlayTapFeedback(bool openedFeel = false)
     {
         if (chestTr == null) return;
+        DOTween.Kill("ChestIdle");
         chestTr.DOKill(true);
+
+        // C2: Chest hop tap SFX (pitch rising per tap handled by SFXManager)
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayChestHop();
 
         Sequence s = DOTween.Sequence().SetLink(gameObject, LinkBehaviour.KillOnDestroy);
 
@@ -572,6 +867,8 @@ public class ChestOpenSceneController : MonoBehaviour
 
         activeWorldCard.SetAnchors(cam, cardMouthAnchor, resolvedPark);
         activeWorldCard.ShowWorldCard(icon, overlayText, onParked, cardBGSprite);
+        // C10: World card swoosh SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayWorldCardSwoosh();
         Debug.Log($"[ChestOpenScene] WorldCard spawned icon={icon?.name} label='{overlayText}'");
     }
 
@@ -608,6 +905,9 @@ public class ChestOpenSceneController : MonoBehaviour
         lidBone.DOKill(true);
         lidBone.localEulerAngles = lidClosedLocalEuler;
 
+        // C3: Chest lid open SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayChestLidOpen();
+
         Debug.Log($"[ChestOpenScene] Opening lid {lidClosedLocalEuler} -> {lidOpenLocalEuler}");
 
         lidBone.DOLocalRotate(lidOpenLocalEuler, lidOpenDuration, RotateMode.Fast)
@@ -621,15 +921,31 @@ public class ChestOpenSceneController : MonoBehaviour
         Debug.Log("[ChestOpenScene] Lid opened  computing rewards, auto-revealing Money.");
         ComputeRewards();
 
+        // ── Phase 1 Hardening: COMMIT rewards immediately so they are safe ──
+        if (rewardPackage != null && ChestSessionManager.Instance != null)
+        {
+            ChestSessionManager.Instance.CommitRewards(rewardPackage);
+            Debug.Log("[ChestOpenScene] Rewards COMMITTED via session manager. Reward is now safe from loss.");
+        }
+        else if (rewardPackage != null)
+        {
+            // Fallback: no session manager — grant directly (legacy behavior)
+            Debug.LogWarning("[ChestOpenScene] No ChestSessionManager! Falling back to immediate grant.");
+            GrantChestRewardsLegacy();
+        }
+
         if (revealController != null)
             revealController.Initialize(rewardPackage);
         else
             Debug.LogError("[ChestOpenScene] revealController NULL  texts won't show.");
 
+        // C4: Money reveal SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayRewardMoney();
+
         // Auto money reveal (tap 3's result)
         BeginAnimating(Phase.Reveal_Money);
         Sprite moneyIcon = revealController != null ? revealController.MoneySprite : null;
-        string moneyLabel = rewardPackage != null ? $"{rewardPackage.moneyMultiplier}x" : "?x";
+        string moneyLabel = rewardPackage != null ? $"+{rewardPackage.moneyGained:N0}" : "?";
 
         SpawnWorldCard(moneyIcon, moneyLabel, () =>
         {
@@ -647,6 +963,7 @@ public class ChestOpenSceneController : MonoBehaviour
     private void ComputeRewards()
     {
         rewardPackage = new ChestRewardPackage();
+        rewardPackage.chestType = cachedChestType;
 
         // Bug #7: Use the cached chest data (read + cleared from PlayerPrefs in Start)
         var chestData = cachedChestData;
@@ -657,12 +974,10 @@ public class ChestOpenSceneController : MonoBehaviour
             Debug.LogWarning("[ChestOpenScene] No cached chest  DEBUG fallback.");
             chestData = new ChestInventoryManager.ChestData
             {
+                chestType  = ChestType.Common,
                 chestName  = "DebugChest",
-                minReward  = 500,
-                maxReward  = 2000,
-                cardReward = 1,
-                turboMin   = 1,
-                turboMax   = 3
+                unlockDurationSeconds = 0f,
+                state      = ChestState.Idle
             };
 #else
             Debug.LogError("[ChestOpenScene] No cached chest data for reward computation!");
@@ -670,47 +985,53 @@ public class ChestOpenSceneController : MonoBehaviour
 #endif
         }
 
-        //  Money — MPS-based flat reward (replaces old multiplier system).
-        //  Chest gold now grants a flat amount = MPS × random(chestGoldMPSMin, chestGoldMPSMax)
-        //  instead of the old "current-money × multiplier" design.
+        //  Money — per-type percentage of current balance, rounded to clean 10-based values.
+        ChestTypeConfig.GetMoneyPercentRange(cachedChestType, out float goldMin, out float goldMax);
         double curMoney = CurrencyManager.Instance != null ? CurrencyManager.Instance.money : 0;
-        double mps = CurrencyManager.Instance != null ? CurrencyManager.Instance.moneyPerSecond : 0;
-        double mpsGold = System.Math.Floor(mps * Random.Range(chestGoldMPSMin, chestGoldMPSMax));
+        double rawGold = curMoney * Random.Range(goldMin, goldMax);
+        double goldReward = RoundToClean10(rawGold);
         rewardPackage.currentMoney = curMoney;
-        rewardPackage.moneyMultiplier = 1; // Display as 1x for UI compatibility
-        rewardPackage.moneyGained = mpsGold;
-        rewardPackage.finalMoneyShown = curMoney + mpsGold;
+        rewardPackage.moneyMultiplier = 1;
+        rewardPackage.moneyGained = goldReward;
+        rewardPackage.finalMoneyShown = curMoney + goldReward;
 
-        //  Nitro (additive) 
-        rewardPackage.nitroReward = ChestRewardPackage.NitroAmounts[
-            Random.Range(0, ChestRewardPackage.NitroAmounts.Length)];
-        rewardPackage.currentNitroCoins = CurrencyManager.Instance != null
-            ? CurrencyManager.Instance.nitroCoins : 0;
-        rewardPackage.finalNitroTotal = rewardPackage.currentNitroCoins + rewardPackage.nitroReward;
+        //  Nitro — per-type percentage of current balance, rounded to nearest 5, min 5.
+        ChestTypeConfig.GetNitroPercentRange(cachedChestType, out float nitroMin, out float nitroMax);
+        int curNitro = CurrencyManager.Instance != null ? CurrencyManager.Instance.nitroCoins : 0;
+        int nitroRaw = Mathf.RoundToInt(curNitro * Random.Range(nitroMin, nitroMax));
+        int nitroReward = Mathf.Max(5, Mathf.RoundToInt(nitroRaw / 5f) * 5);
+        rewardPackage.nitroReward = nitroReward;
+        rewardPackage.currentNitroCoins = curNitro;
+        rewardPackage.finalNitroTotal = curNitro + nitroReward;
 
-        //  Card (weighted rarity + level decay + dynamic multiplier) 
-        if (CardManager.Instance != null &&
-            CardManager.Instance.cards != null &&
-            CardManager.Instance.cards.Length > 0)
+        //  Card (per-type rarity weights + level decay + dynamic multiplier) 
+        bool cmExists = CardManager.Instance != null;
+        bool cmHasCards = cmExists && CardManager.Instance.cards != null && CardManager.Instance.cards.Length > 0;
+        Debug.Log($"[ChestOpenScene] Card guard: CardManager.Instance={(cmExists ? "EXISTS" : "NULL")} " +
+                  $"cards={(cmHasCards ? CardManager.Instance.cards.Length.ToString() : "EMPTY/NULL")}");
+
+        if (cmHasCards)
         {
             var cards = CardManager.Instance.cards;
-            var def = PickWeightedCard(cards);
+            float[] typeWeights = ChestTypeConfig.GetCardRarityWeights(cachedChestType);
+            var def = PickWeightedCard(cards, typeWeights);
 
             rewardPackage.cardType = def.type;
             rewardPackage.cardDisplayName = def.displayName;
             rewardPackage.cardIcon = def.icon;
-            // Full card artwork for world-space reveal; fall back to icon if not set
             rewardPackage.cardArtSprite = def.cardArtSprite != null ? def.cardArtSprite : def.icon;
             rewardPackage.cardRarity = def.rarity;
 
-            // C: Snapshot pre-reward copies for progress bar animation
+            Debug.Log($"[ChestOpenScene] CardSelected: type={def.type} name='{def.displayName}' " +
+                      $"rarity={def.rarity} icon={(def.icon != null ? def.icon.name : "NULL")} " +
+                      $"artSprite={(def.cardArtSprite != null ? def.cardArtSprite.name : "NULL")} " +
+                      $"copiesOwned={def.copiesOwned} level={def.currentLevel}");
+
             rewardPackage.preRewardCopiesOwned = Mathf.Clamp(def.copiesOwned, 0, CardDropTuning.SegmentsPerUpgrade);
 
-            // Dynamic segment multiplier based on selected card's level
             int multiplier = CardDropTuning.GetCardDropMultiplier(def.currentLevel);
-            rewardPackage.cardCopies = multiplier;  // segments granted
+            rewardPackage.cardCopies = multiplier;
 
-            // Simulated post-reward preview using canonical CardManager method
             var progress = CardManager.Instance.GetCardProgress(def.type, rewardPackage.cardCopies);
             rewardPackage.postRewardLevel = progress.level;
             rewardPackage.postRewardCopiesOwned = progress.currentCopies;
@@ -724,13 +1045,43 @@ public class ChestOpenSceneController : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("[ChestOpenScene] No cards in CardManager  card reward skipped.");
+            Debug.LogError($"[ChestOpenScene] CARD REWARD SKIPPED! CardManager.Instance={(cmExists ? "EXISTS but cards null/empty" : "NULL")}.");
         }
 
-        Debug.Log($"[ChestOpenScene] Rewards: Money={rewardPackage.finalMoneyShown:N0} " +
-                  $"({rewardPackage.moneyMultiplier}x of {rewardPackage.currentMoney:N0}), " +
+        //  Sticker (4th reward, Rare/Legendary only) 
+        Debug.Log($"[ChestOpenScene] 4th-reward check: chestType={cachedChestType}, eligible={ChestTypeConfig.CanHaveStickerReward(cachedChestType)}, dbAssigned={garageDatabase != null}");
+        if (ChestTypeConfig.CanHaveStickerReward(cachedChestType))
+        {
+            if (StickerRewardHelper.TryPickRandomSticker(garageDatabase, out var sticker))
+            {
+                rewardPackage.hasStickerReward = true;
+                rewardPackage.stickerCarId = sticker.carId;
+                rewardPackage.stickerCarDisplayName = sticker.carDisplayName;
+                rewardPackage.stickerIndex = sticker.stickerIndex;
+                Debug.Log($"[ChestOpenScene] Sticker reward: car={sticker.carId} idx={sticker.stickerIndex} name={sticker.carDisplayName}");
+            }
+            else
+            {
+                Debug.Log("[ChestOpenScene] No unowned stickers available — 3-reward chest.");
+            }
+        }
+
+        Debug.Log($"[ChestOpenScene] Rewards: Money=+{rewardPackage.moneyGained:N0} " +
+                  $"(from {rewardPackage.currentMoney:N0}), " +
                   $"Nitro=+{rewardPackage.nitroReward} (total {rewardPackage.finalNitroTotal}), " +
-                  $"Card={rewardPackage.cardDisplayName} x{rewardPackage.cardCopies}");
+                  $"Card={rewardPackage.cardDisplayName} x{rewardPackage.cardCopies}, " +
+                  $"Sticker={rewardPackage.hasStickerReward} type={cachedChestType}");
+    }
+
+    /// <summary>
+    /// Rounds a value to the nearest "clean" multiple of its order of magnitude.
+    /// e.g. 75→80, 340→300, 2700→3000. Minimum return is 10.
+    /// </summary>
+    private static double RoundToClean10(double value)
+    {
+        if (value < 10) return 10;
+        double magnitude = System.Math.Pow(10, System.Math.Floor(System.Math.Log10(value)));
+        return System.Math.Max(10, System.Math.Round(value / magnitude, System.MidpointRounding.AwayFromZero) * magnitude);
     }
 
     // 
@@ -738,18 +1089,17 @@ public class ChestOpenSceneController : MonoBehaviour
     // 
 
     /// <summary>
-    /// Picks a card using:
-    ///   weight(card) = rarityBaseWeight * LevelDecay(card.level)
-    /// This makes high-level cards less likely but never impossible.
+    /// Picks a card using per-type rarity weights + level decay.
     /// </summary>
-    private CardDefinition PickWeightedCard(CardDefinition[] cards)
+    private CardDefinition PickWeightedCard(CardDefinition[] cards, float[] rarityWeights)
     {
         float totalWeight = 0f;
         float[] weights = new float[cards.Length];
 
         for (int i = 0; i < cards.Length; i++)
         {
-            float rarityW = CardDropTuning.RarityBaseWeights[(int)cards[i].rarity];
+            int rarityIdx = Mathf.Clamp((int)cards[i].rarity, 0, rarityWeights.Length - 1);
+            float rarityW = rarityWeights[rarityIdx];
             float decay = CardDropTuning.LevelDecay(cards[i].currentLevel);
             weights[i] = rarityW * decay;
             totalWeight += weights[i];
@@ -786,11 +1136,17 @@ public class ChestOpenSceneController : MonoBehaviour
         if (rewardsGranted) return;
         rewardsGranted = true;
 
-        bool ok = GrantChestRewards();
-        Debug.Log($"[ChestOpenScene] Rewards granted: {ok}");
+        // ── Phase 1 Hardening: Rewards already committed in OnLidOpened(). ──
+        // Tap 7 just finalizes the session and returns to Main.
 
-        // Bug #7: Safety net — clear pending key again. Normally already cleared in
-        // Start(), but this guards against edge cases (e.g. PlayerPrefs.Save failed earlier).
+        // Complete the session (clears persisted session data)
+        if (ChestSessionManager.Instance != null)
+        {
+            ChestSessionManager.Instance.CompleteSession();
+            Debug.Log("[ChestOpenScene] Session completed.");
+        }
+
+        // Clear legacy pending key (safety net)
         if (ChestInventoryManager.Instance != null)
             ChestInventoryManager.Instance.ClearPendingOpenChest();
 
@@ -800,6 +1156,47 @@ public class ChestOpenSceneController : MonoBehaviour
         SceneManager.LoadScene("Main");
     }
 
+    /// <summary>
+    /// Legacy fallback: grant rewards directly if ChestSessionManager is unavailable.
+    /// Only called when the session manager singleton is missing.
+    /// </summary>
+    private void GrantChestRewardsLegacy()
+    {
+        if (rewardPackage == null)
+        {
+            Debug.LogError("[ChestOpenScene] rewardPackage NULL!");
+            return;
+        }
+
+        if (CurrencyManager.Instance != null && rewardPackage.moneyGained > 0)
+            CurrencyManager.Instance.AddMoney(rewardPackage.moneyGained);
+
+        if (CurrencyManager.Instance != null && rewardPackage.nitroReward > 0)
+            CurrencyManager.Instance.AddNitroCoins(rewardPackage.nitroReward);
+
+        if (CardManager.Instance != null && rewardPackage.cardCopies > 0)
+            CardManager.Instance.AddCardCopies(rewardPackage.cardType, rewardPackage.cardCopies);
+
+        if (rewardPackage.hasStickerReward)
+        {
+            StickerRewardHelper.GrantSticker(new StickerRewardHelper.StickerReward
+            {
+                carId = rewardPackage.stickerCarId,
+                stickerIndex = rewardPackage.stickerIndex
+            });
+        }
+
+        // Also remove chest from inventory (legacy path: it may still be OpeningInProgress)
+        if (ChestInventoryManager.Instance != null)
+            ChestInventoryManager.Instance.RemoveOpeningChest();
+
+        if (SaveSystem.Instance != null)
+            SaveSystem.Instance.SaveGame();
+
+        Debug.Log("[ChestOpenScene] Legacy reward grant completed.");
+    }
+
+    // kept for backward compat; no longer the primary grant path
     private bool GrantChestRewards()
     {
         if (rewardPackage == null)

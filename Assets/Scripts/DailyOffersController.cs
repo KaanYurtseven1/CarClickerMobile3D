@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using TMPro;
 using System;
 using System.Collections;
@@ -252,6 +253,10 @@ public class DailyOffersController : MonoBehaviour
             return;
         }
 
+        // U5: Free reward claim SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayDailyFreeClaim();
+
         GrantFreeReward();
 
         freeClaimed = true;
@@ -291,11 +296,13 @@ public class DailyOffersController : MonoBehaviour
         switch (reward)
         {
             case FreeRewardType.Money:
-                double amount = Math.Floor(UnityEngine.Random.Range((float)freeMoneyMin, (float)freeMoneyMax));
+                double currentMoney = CurrencyManager.Instance != null ? CurrencyManager.Instance.money : 0;
+                double scaled = Math.Floor(currentMoney * UnityEngine.Random.Range(0.01f, 0.03f));
+                double amount = Math.Max(freeMoneyMin, scaled);
                 if (CurrencyManager.Instance != null)
                 {
                     CurrencyManager.Instance.AddMoney(amount, "DailyOfferFree");
-                    Debug.Log($"[DailyOffers] Free reward: +{amount} Money");
+                    Debug.Log($"[DailyOffers] Free reward: +{amount} Money (scaled from balance {currentMoney})");
                 }
                 else
                     Debug.LogWarning("[DailyOffers] CurrencyManager is null, cannot grant money.");
@@ -313,19 +320,42 @@ public class DailyOffersController : MonoBehaviour
                 break;
 
             case FreeRewardType.FreeChest:
-                // Existing chest system works via world-spawned Chest objects.
-                // No direct "grant chest to inventory" API exists.
-                // Placeholder: log + potential future hook.
-                Debug.Log("[DailyOffers] Free reward: FREE CHEST granted (placeholder — hook into chest system when ready).");
-
-                // If ChestInventoryManager supports a direct-add in the future, call it here:
-                // ChestInventoryManager.Instance?.AddChestDirect(...);
+                OpenFreeCommonChest();
                 break;
         }
 
         // Save after granting
         if (SaveSystem.Instance != null)
             SaveSystem.Instance.SaveGame();
+    }
+
+    /// <summary>
+    /// Opens a free Common chest using the same session pipeline as Blacklist rewards.
+    /// Creates ChestData → BeginSession → LoadScene("ChestOpenScene").
+    /// </summary>
+    private void OpenFreeCommonChest()
+    {
+        var sessionMgr = ChestSessionManager.Instance;
+        if (sessionMgr == null)
+        {
+            Debug.LogError("[DailyOffers] ChestSessionManager not found! Cannot open free chest.");
+            return;
+        }
+
+        var chestData = new ChestInventoryManager.ChestData
+        {
+            chestType = ChestType.Common,
+            chestName = "Daily Offer Chest",
+            unlockDurationSeconds = 0f,
+            state = ChestState.Idle,
+            unlockEndUtcTicks = 0,
+            halfTimeUsed = false
+        };
+
+        sessionMgr.BeginSession(chestData);
+
+        Debug.Log("[DailyOffers] Free reward: opening Common chest via ChestOpenScene.");
+        SceneManager.LoadScene("ChestOpenScene");
     }
 
     // ──────────────────────────────── Card Purchase Logic ──────────────────────
@@ -369,6 +399,10 @@ public class DailyOffersController : MonoBehaviour
 
         // Grant copies (does NOT auto-upgrade — matches requirement)
         CardManager.Instance.AddCardCopies(cardType, scaledCopies);
+
+        // U6: Card purchase SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayDailyPackBuy();
 
         Debug.Log($"[DailyOffers] Purchased +{scaledCopies} copies of {cardType} for {scaledPrice} NitroCoins (purchase #{totalPurchases + 1}).");
 

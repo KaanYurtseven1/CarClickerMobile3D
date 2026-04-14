@@ -1,122 +1,183 @@
-using TMPro;
+using System.Collections.Generic;
 using UnityEngine;
+using DG.Tweening;
 
 public class ChestShownUI : MonoBehaviour
 {
     public static ChestShownUI Instance;
 
-    // ── Debug Instrumentation ─────────────────────────────────────────
-    [Header("Debug")]
-    [SerializeField] private bool debugLogs = false;
-
-    private void DLog(string msg)
-    {
-        if (!debugLogs) return;
-        Debug.Log($"[ChestShownUI][{name}#{GetInstanceID()}] t={Time.time:F2} rt={Time.realtimeSinceStartup:F2} f={Time.frameCount} scene={UnityEngine.SceneManagement.SceneManager.GetActiveScene().name} | {msg}");
-    }
-    // ──────────────────────────────────────────────────────────────────
-
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    private static void ResetStatics()
-    {
-        Instance = null;
-    }
+    private static void ResetStatics() { Instance = null; }
 
-    [Header("Root (hide/show)")]
-    [SerializeField] private GameObject root; // ChestShown parent (ikon + text)
+    [Header("Slot System")]
+    [SerializeField] private Transform slotContainer; // ChestShownPlace with VerticalLayoutGroup
+    [SerializeField] private GameObject slotPrefab;   // ChestSlotUI prefab
 
-    [SerializeField] private TextMeshProUGUI countText;
+    [Header("Police Chase Fade")]
+    [SerializeField] private CanvasGroup canvasGroup;
+    [SerializeField] private float chaseFadeOutDuration = 0.35f;
+    [SerializeField] private float chaseFadeInDuration = 0.45f;
+
+    private readonly List<ChestSlotUI> _activeSlots = new List<ChestSlotUI>();
+    private bool _hiddenByChase;
 
     private void Awake()
     {
-        if (Instance == null)
-            Instance = this;
-        else if (Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
+        if (Instance == null) Instance = this;
+        else if (Instance != this) { Destroy(gameObject); return; }
+        EnsureCanvasGroup();
     }
 
     private void OnDestroy()
     {
-        if (Instance == this)
-            Instance = null;
-    }
-
-    private void Start()
-    {
-        RefreshVisibilityAndCount();
+        if (Instance == this) Instance = null;
     }
 
     private void OnEnable()
     {
         if (ChestInventoryManager.Instance != null)
-            ChestInventoryManager.Instance.OnInventoryChanged += RefreshVisibilityAndCount;
+            ChestInventoryManager.Instance.OnInventoryChanged += RefreshSlots;
+        PoliceCatchController.OnChaseStarted += HandleChaseStarted;
+        PoliceCatchController.OnChaseEnded += HandleChaseEnded;
     }
 
     private void OnDisable()
     {
         if (ChestInventoryManager.Instance != null)
-            ChestInventoryManager.Instance.OnInventoryChanged -= RefreshVisibilityAndCount;
+            ChestInventoryManager.Instance.OnInventoryChanged -= RefreshSlots;
+        PoliceCatchController.OnChaseStarted -= HandleChaseStarted;
+        PoliceCatchController.OnChaseEnded -= HandleChaseEnded;
     }
 
-    public void RefreshVisibilityAndCount()
+    private void Start() => RefreshSlots();
+
+    private void Update()
     {
-        // During police chase, ChestShown must stay hidden
+        // Refresh timer text on unlocking slots
+        if (ChestInventoryManager.Instance == null) return;
+        var allChests = ChestInventoryManager.Instance.GetAllChests();
+        for (int i = 0; i < _activeSlots.Count && i < allChests.Count; i++)
+        {
+            var cd = allChests[i];
+            if (cd.state == ChestState.Unlocking)
+                _activeSlots[i].RefreshStatus(cd.state, cd.GetRemainingSeconds());
+        }
+    }
+
+    public void RefreshSlots()
+    {
+        if (_hiddenByChase) return;
+
+        // During police chase or radar popup, hide
         if (PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive)
         {
-            if (root != null)
-                root.SetActive(false);
-            else
-                gameObject.SetActive(false);
+            SetContainerVisible(false);
             return;
         }
-
-        // During radar popup, ChestShown must stay hidden
         if (RadarPopupController.Instance != null && RadarPopupController.Instance.IsPopupOpen)
         {
-            if (root != null)
-                root.SetActive(false);
-            else
-                gameObject.SetActive(false);
+            SetContainerVisible(false);
             return;
         }
 
-        int count = 0;
-        if (ChestInventoryManager.Instance != null)
-            count = ChestInventoryManager.Instance.GetUnopenedCount(); // toplam chest
+        // Clear old slots
+        foreach (var slot in _activeSlots)
+            if (slot != null) Destroy(slot.gameObject);
+        _activeSlots.Clear();
 
-        if (countText != null)
-            countText.text = count.ToString();
+        if (ChestInventoryManager.Instance == null) { SetContainerVisible(false); return; }
 
-        if (root != null)
-            root.SetActive(count > 0);
-        else
-            gameObject.SetActive(count > 0);
+        var allChests = ChestInventoryManager.Instance.GetAllChests();
+        if (allChests.Count == 0) { SetContainerVisible(false); return; }
+
+        SetContainerVisible(true);
+        for (int i = 0; i < allChests.Count; i++)
+        {
+            var cd = allChests[i];
+            if (cd.state == ChestState.OpeningInProgress)
+                continue;
+
+            if (slotPrefab == null || slotContainer == null) continue;
+
+            var go = Instantiate(slotPrefab, slotContainer);
+            var slot = go.GetComponent<ChestSlotUI>();
+            if (slot != null)
+            {
+                slot.Initialize(i, cd.chestType, cd.state, cd.GetRemainingSeconds(), OnSlotTapped);
+                _activeSlots.Add(slot);
+            }
+        }
     }
 
+    // Legacy bridge
+    public void RefreshVisibilityAndCount() => RefreshSlots();
 
-    // ChestShown ikonuna tıklama (Button OnClick)
+    // Legacy bridge
     public void OnChestShownTapped()
     {
-        DLog($"OnChestShownTapped — ChestInventoryManager.Instance={(ChestInventoryManager.Instance != null ? "EXISTS" : "NULL")} ChestPopupController.Instance={(ChestPopupController.Instance != null ? "EXISTS" : "NULL")}");
-
-        Debug.Log("[ChestShownUI] Trying to open popup...");
-
-        Debug.Log("[ChestShownUI] ChestPopupController.Instance = " + (ChestPopupController.Instance != null));
-
-        Debug.Log("[ChestShownUI] ChestInventoryManager.Instance = " + (ChestInventoryManager.Instance != null));
-
-
-        Debug.Log("[ChestShownUI] OnChestShownTapped fired");
-        // Chest yoksa popup açma
         if (ChestInventoryManager.Instance == null) return;
         if (ChestInventoryManager.Instance.GetUnopenedCount() <= 0) return;
-
-        Debug.Log("[ChestShownUI] BEFORE open call");
         if (ChestPopupController.Instance != null)
-            ChestPopupController.Instance.ShowPopupFromInventory();
-        Debug.Log("[ChestShownUI] AFTER open call");
+            ChestPopupController.Instance.ShowPopupForChest(0);
+    }
+
+    private void OnSlotTapped(int chestIndex)
+    {
+        Debug.Log($"[ChestShownUI] OnSlotTapped({chestIndex}) called");
+        if (ChestPopupController.Instance == null)
+        {
+            Debug.LogError("[ChestShownUI] ChestPopupController.Instance is NULL! " +
+                "Create a 'ChestPopup' GameObject in the scene with ChestPopupController attached.");
+            return;
+        }
+        ChestPopupController.Instance.ShowPopupForChest(chestIndex);
+    }
+
+    private void SetContainerVisible(bool visible)
+    {
+        if (slotContainer != null) slotContainer.gameObject.SetActive(visible);
+        else gameObject.SetActive(visible);
+    }
+
+    // ═══════════ POLICE CHASE FADE ═══════════
+
+    private void EnsureCanvasGroup()
+    {
+        if (canvasGroup != null) return;
+        GameObject target = slotContainer != null ? slotContainer.gameObject : gameObject;
+        canvasGroup = target.GetComponent<CanvasGroup>();
+        if (canvasGroup == null) canvasGroup = target.AddComponent<CanvasGroup>();
+    }
+
+    private void HandleChaseStarted()
+    {
+        GameObject target = slotContainer != null ? slotContainer.gameObject : gameObject;
+        if (!target.activeSelf) return;
+        _hiddenByChase = true;
+        EnsureCanvasGroup();
+        DOTween.Kill(canvasGroup);
+        canvasGroup.DOFade(0f, chaseFadeOutDuration)
+            .SetEase(Ease.OutQuad)
+            .OnComplete(() => { canvasGroup.interactable = false; canvasGroup.blocksRaycasts = false; });
+    }
+
+    private void HandleChaseEnded()
+    {
+        if (!_hiddenByChase) return;
+        _hiddenByChase = false;
+
+        int count = ChestInventoryManager.Instance != null ? ChestInventoryManager.Instance.GetUnopenedCount() : 0;
+        if (count <= 0)
+        {
+            if (canvasGroup != null) { canvasGroup.alpha = 1f; canvasGroup.interactable = true; canvasGroup.blocksRaycasts = true; }
+            return;
+        }
+
+        EnsureCanvasGroup();
+        DOTween.Kill(canvasGroup);
+        canvasGroup.interactable = true;
+        canvasGroup.blocksRaycasts = true;
+        canvasGroup.DOFade(1f, chaseFadeInDuration).SetEase(Ease.OutQuad);
+        RefreshSlots();
     }
 }

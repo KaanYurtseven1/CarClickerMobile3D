@@ -2,6 +2,7 @@
 using TMPro;
 using DG.Tweening;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 // ======================================================================
@@ -39,13 +40,25 @@ public class ChestRewardPackage
     public int copiesNeededForNext;
     public float upgradeProgress01;
 
+    // ---- Chest type ----
+    public ChestType chestType;
+
+    // ---- Sticker (4th reward, Rare/Legendary only) ----
+    public bool hasStickerReward;
+    public string stickerCarId;
+    public string stickerCarDisplayName;
+    public int stickerIndex;
+
+    /// <summary>Number of reward reveals (3 base + 1 sticker if applicable).</summary>
+    public int RewardCount => hasStickerReward ? 4 : 3;
+
     // ---- Static pools ----
     public static readonly int[] MoneyMultipliers = { 2, 3, 4, 5 };
     public static readonly int[] NitroAmounts = { 5, 10, 15, 25, 50 };
 
-    // ---- Rarity weights (Common most likely, Legendary least) ----
-    // indices:  0=Common  1=Rare  2=Epic  3=Legendary
-    public static readonly float[] RarityWeights = { 50f, 30f, 15f, 5f };
+    // ---- Rarity weights (Common most likely, Legendary disabled) ----
+    // indices:  0=Common  1=Rare  2=Epic  3=Legendary (weight 0 = disabled)
+    public static readonly float[] RarityWeights = { 50f, 30f, 15f, 0f };
 }
 
 // ======================================================================
@@ -114,13 +127,12 @@ public class ChestRewardRevealController : MonoBehaviour
 
     [SerializeField] private TextMeshPro summaryTitleText;
 
-    [Header("Summary Cards (SpriteRenderer + TMP overlay each)")]
-    [SerializeField] private SpriteRenderer summaryCard1;   // Money
-    [SerializeField] private TextMeshPro summaryOverlay1;
-    [SerializeField] private SpriteRenderer summaryCard2;   // Nitro
-    [SerializeField] private TextMeshPro summaryOverlay2;
-    [SerializeField] private SpriteRenderer summaryCard3;   // Real Card
-    [SerializeField] private TextMeshPro summaryOverlay3;
+    [Header("Dynamic Summary Slots")]
+    [Tooltip("Prefab with SummarySlotUI component. Instantiated once per reward.")]
+    [SerializeField] private GameObject summarySlotPrefab;
+
+    [Tooltip("Container transform inside SummaryRoot where slot instances are spawned.")]
+    [SerializeField] private Transform summarySlotsContainer;
 
     // ──────────────────────────────────────────────────────────────────
     //  REWARD ICON SPRITES
@@ -128,6 +140,7 @@ public class ChestRewardRevealController : MonoBehaviour
     [Header("Reward Icon Sprites")]
     [SerializeField] private Sprite moneySprite;
     [SerializeField] private Sprite nitroSprite;
+    [SerializeField] private Sprite stickerSprite;
 
     // ──────────────────────────────────────────────────────────────────
     //  ANIMATION TUNING
@@ -154,16 +167,16 @@ public class ChestRewardRevealController : MonoBehaviour
 
     [Header("Summary Card Size Normalization")]
     [Tooltip("Target world-space height (in world units) that every summary SpriteRenderer should occupy. \n"
-           + "All 3 summary cards (Money, Nitro, Card) are scaled so their SpriteRenderer renders at \n"
-           + "exactly this height, eliminating the size difference caused by different sprite dimensions / PPU. \n"
-           + "Calibration: run in Play Mode, read the '[RewardReveal] SummaryCard' logs for summaryCard1 \n"
-           + "(Money) and copy its 'bounds.y' value here. Set to 0 to disable normalization.")]
+           + "Set to 0 to disable normalization.")]
     [SerializeField] private float summaryCardWorldHeight = 1.0f;
 
     // ──────────────────────────────────────────────────────────────────
     //  RUNTIME STATE
     // ──────────────────────────────────────────────────────────────────
     private ChestRewardPackage _rewards;
+
+    /// <summary>Dynamically generated summary slot instances (cleared each chest open).</summary>
+    private readonly List<SummarySlotUI> _generatedSlots = new List<SummarySlotUI>();
 
     /// <summary>Cached prefab localScales for each fill segment (set once in Awake).</summary>
     private Vector3[] _segmentBaseScales;
@@ -177,6 +190,30 @@ public class ChestRewardRevealController : MonoBehaviour
 
     public Sprite MoneySprite => moneySprite;
     public Sprite NitroSprite => nitroSprite;
+    public Sprite StickerSprite => stickerSprite;
+
+    /// <summary>
+    /// Instantly kills ALL active tweens on this controller and resets to a clean state.
+    /// Called when the player spam-taps to skip through reward reveal animations.
+    /// </summary>
+    public void SnapKillAllTweens()
+    {
+        KillPerCharTweens();
+        KillSegmentTweens();
+        DOTween.Kill(this);
+        DOTween.Kill("BarPartBounce");
+
+        RestoreTMPVertices(worldTitle);
+        RestoreTMPVertices(worldSubtitle);
+        RestoreTMPVertices(worldValue);
+
+        HideWorldTexts();
+        HideProgress();
+
+        _isFadingTexts = false;
+        _isShowingProgress = false;
+        _isBouncingBar = false;
+    }
 
     // ══════════════════════════════════════════════════════════════════
     //  LIFECYCLE
@@ -307,7 +344,11 @@ public class ChestRewardRevealController : MonoBehaviour
     {
         _rewards = rewards;
         HideAll();
-        Debug.Log("[RewardReveal] Initialized.");
+        Debug.Log($"[RewardReveal] Initialized — card fields: " +
+                  $"displayName='{rewards?.cardDisplayName}' rarity={rewards?.cardRarity} " +
+                  $"icon={(rewards?.cardIcon != null ? rewards.cardIcon.name : "NULL")} " +
+                  $"artSprite={(rewards?.cardArtSprite != null ? rewards.cardArtSprite.name : "NULL")} " +
+                  $"copies={rewards?.cardCopies} pre={rewards?.preRewardCopiesOwned} post={rewards?.postRewardCopiesOwned}");
     }
 
     //  MONEY 
@@ -315,9 +356,9 @@ public class ChestRewardRevealController : MonoBehaviour
     public void ShowMoneyInfo(Action onComplete)
     {
         if (_rewards == null) { Debug.LogError("[RewardReveal] _rewards is null!"); onComplete?.Invoke(); return; }
-        DLog($"ShowMoneyInfo ENTRY — multiplier={_rewards.moneyMultiplier} finalMoney={_rewards.finalMoneyShown}");
-        Debug.Log($"[RewardReveal] ShowMoneyInfo {_rewards.moneyMultiplier}x => {_rewards.finalMoneyShown:N0}"); ;
-        SetWorldTexts("Money", "Resource Card", FormatMoney(_rewards.finalMoneyShown));
+        DLog($"ShowMoneyInfo ENTRY — gained={_rewards.moneyGained} finalMoney={_rewards.finalMoneyShown}");
+        Debug.Log($"[RewardReveal] ShowMoneyInfo +{_rewards.moneyGained:N0} => {_rewards.finalMoneyShown:N0}");
+        SetWorldTexts("Money", "Resource Card", $"+{FormatMoney(_rewards.moneyGained)}");
         HideProgress();
         FadeInWorldTexts(onComplete);
     }
@@ -339,15 +380,22 @@ public class ChestRewardRevealController : MonoBehaviour
     public void ShowCardInfo(Action onComplete)
     {
         if (_rewards == null) { Debug.LogError("[RewardReveal] _rewards is null!"); onComplete?.Invoke(); return; }
-        DLog($"ShowCardInfo ENTRY — card={_rewards.cardDisplayName} rarity={_rewards.cardRarity} copies={_rewards.cardCopies} pre={_rewards.preRewardCopiesOwned} post={_rewards.postRewardCopiesOwned}");
-        Debug.Log($"[RewardReveal] ShowCardInfo {_rewards.cardDisplayName} x{_rewards.cardCopies}");
+
+        Debug.Log($"[RewardReveal] ShowCardInfo ENTRY — " +
+                  $"displayName='{_rewards.cardDisplayName}' rarity={_rewards.cardRarity} " +
+                  $"icon={(_rewards.cardIcon != null ? _rewards.cardIcon.name : "NULL")} " +
+                  $"artSprite={(_rewards.cardArtSprite != null ? _rewards.cardArtSprite.name : "NULL")} " +
+                  $"copies={_rewards.cardCopies} pre={_rewards.preRewardCopiesOwned} " +
+                  $"post={_rewards.postRewardCopiesOwned} level={_rewards.postRewardLevel} " +
+                  $"progress01={_rewards.upgradeProgress01:F3}");
 
         // A1: Always show rarity for card phase
-        string rarityStr = _rewards.cardRarity.ToString(); // Common / Rare / Epic / Legendary
+        string rarityStr = _rewards.cardRarity.ToString(); // Common / Rare / Epic
         string sub = $"{rarityStr} Card";
 
         // A2: Use displayName (scene-fixed); also sanitize as safety
         string title = SanitizeDisplayName(_rewards.cardDisplayName);
+        Debug.Log($"[RewardReveal] ShowCardInfo — title='{title}' subtitle='{sub}'");
         SetWorldTexts(title, sub, "");
 
         // Bounce BarPart in (BG visible, fill hidden) while text typewriter runs
@@ -371,6 +419,18 @@ public class ChestRewardRevealController : MonoBehaviour
             onComplete?.Invoke();
         });
         DLog("ShowCardInfo EXIT (async chain started)");
+    }
+
+    //  STICKER 
+
+    public void ShowStickerInfo(Action onComplete)
+    {
+        if (_rewards == null) { Debug.LogError("[RewardReveal] _rewards is null!"); onComplete?.Invoke(); return; }
+        string title = _rewards.stickerCarDisplayName ?? "Sticker";
+        Debug.Log($"[RewardReveal] ShowStickerInfo — car={_rewards.stickerCarId} idx={_rewards.stickerIndex} name={title}");
+        SetWorldTexts(title, "Sticker Reward", $"#{_rewards.stickerIndex}");
+        HideProgress();
+        FadeInWorldTexts(onComplete);
     }
 
     //  FADE OUT 
@@ -412,38 +472,54 @@ public class ChestRewardRevealController : MonoBehaviour
         }
     }
 
-    //  SUMMARY 
+    //  SUMMARY (dynamic prefab-based) 
 
     public void ShowSummary(Action onComplete)
     {
-        Debug.Log("[RewardReveal] ShowSummary");
+        Debug.Log("[RewardReveal] ShowSummary (dynamic)");
+
+        // 1. Clear any previously generated slots
+        ClearGeneratedSummarySlots();
 
         if (summaryTitleText != null) summaryTitleText.text = "You found:";
 
-        // Money
-        if (summaryCard1 != null && moneySprite != null)
+        // 2. Build reward sprite list from actual reward data
+        if (_rewards != null && summarySlotPrefab != null)
         {
-            summaryCard1.sprite = moneySprite;
-            NormalizeSummaryCardScale(summaryCard1, moneySprite, "summaryCard1(Money)");
-        }
-        if (summaryOverlay1 != null) summaryOverlay1.text = $"{_rewards.moneyMultiplier}x";
+            Transform parent = summarySlotsContainer != null ? summarySlotsContainer : summaryRoot?.transform;
+            if (parent != null)
+            {
+                // Money
+                if (moneySprite != null)
+                    SpawnSummarySlot(parent, moneySprite, "Money");
 
-        // Nitro
-        if (summaryCard2 != null && nitroSprite != null)
+                // Nitro
+                if (nitroSprite != null)
+                    SpawnSummarySlot(parent, nitroSprite, "Nitro");
+
+                // Card (use actual card icon)
+                if (_rewards.cardIcon != null)
+                    SpawnSummarySlot(parent, _rewards.cardIcon, "Card");
+                else if (_rewards.cardArtSprite != null)
+                    SpawnSummarySlot(parent, _rewards.cardArtSprite, "Card(art)");
+
+                // Sticker (only if chest actually gave one)
+                if (_rewards.hasStickerReward && stickerSprite != null)
+                    SpawnSummarySlot(parent, stickerSprite, "Sticker");
+
+                // Assign fixed positions based on total slot count
+                ApplyFixedSlotPositions();
+            }
+        }
+        else
         {
-            summaryCard2.sprite = nitroSprite;
-            NormalizeSummaryCardScale(summaryCard2, nitroSprite, "summaryCard2(Nitro)");
+            if (summarySlotPrefab == null)
+                Debug.LogWarning("[RewardReveal] summarySlotPrefab is null! Cannot generate summary slots.");
         }
-        if (summaryOverlay2 != null) summaryOverlay2.text = $"+{_rewards.nitroReward}";
 
-        // Real card
-        if (summaryCard3 != null && _rewards?.cardIcon != null)
-        {
-            summaryCard3.sprite = _rewards.cardIcon;
-            NormalizeSummaryCardScale(summaryCard3, _rewards.cardIcon, "summaryCard3(Card)");
-        }
-        if (summaryOverlay3 != null) summaryOverlay3.text = $"x{_rewards?.cardCopies}";
+        Debug.Log($"[RewardReveal] ShowSummary — generated {_generatedSlots.Count} slots");
 
+        // 3. Fade in
         if (summaryRoot != null)
         {
             SetSummaryAlpha(0f);
@@ -461,11 +537,73 @@ public class ChestRewardRevealController : MonoBehaviour
         }
     }
 
+    /// <summary>Instantiates one summary slot prefab, sets its sprite, and normalizes scale.</summary>
+    private void SpawnSummarySlot(Transform parent, Sprite sprite, string debugLabel)
+    {
+        GameObject go = Instantiate(summarySlotPrefab, parent);
+        go.transform.localScale = Vector3.one;
+
+        SummarySlotUI slot = go.GetComponent<SummarySlotUI>();
+        if (slot == null)
+        {
+            Debug.LogWarning($"[RewardReveal] summarySlotPrefab is missing SummarySlotUI component!");
+            Destroy(go);
+            return;
+        }
+
+        slot.SetSprite(sprite);
+        _generatedSlots.Add(slot);
+
+        // Normalize scale so all slots render at the same world-space height
+        if (slot.RewardImage != null)
+            NormalizeSummaryCardScale(slot.RewardImage, sprite, debugLabel);
+    }
+
+    // Fixed world-space positions per reward count
+    private static readonly Vector3[] _positions3 =
+    {
+        new Vector3(-1.15f, 0f, 0f),
+        new Vector3( 0.0f,  0f, 0f),
+        new Vector3( 1.15f, 0f, 0f)
+    };
+
+    private static readonly Vector3[] _positions4 =
+    {
+        new Vector3(-1.15f, 0f, 0f),
+        new Vector3( 0.0f,  0f, 0f),
+        new Vector3( 1.15f, 0f, 0f),
+        new Vector3( 0.0f,  1.15f, 0f)
+    };
+
+    private void ApplyFixedSlotPositions()
+    {
+        int count = _generatedSlots.Count;
+        Vector3[] positions = count == 4 ? _positions4 : _positions3;
+
+        for (int i = 0; i < count; i++)
+        {
+            _generatedSlots[i].transform.localPosition =
+                i < positions.Length ? positions[i] : Vector3.zero;
+        }
+    }
+
+    /// <summary>Destroys all previously generated summary slot instances.</summary>
+    private void ClearGeneratedSummarySlots()
+    {
+        for (int i = _generatedSlots.Count - 1; i >= 0; i--)
+        {
+            if (_generatedSlots[i] != null)
+                Destroy(_generatedSlots[i].gameObject);
+        }
+        _generatedSlots.Clear();
+    }
+
     public void HideAll()
     {
         DLog("HideAll called");
         HideWorldTexts();
         HideProgress();
+        ClearGeneratedSummarySlots();
         if (summaryRoot != null) summaryRoot.SetActive(false);
     }
 
@@ -1196,12 +1334,11 @@ public class ChestRewardRevealController : MonoBehaviour
     private void SetSummaryAlpha(float a)
     {
         if (summaryTitleText != null) summaryTitleText.alpha = a;
-        SetSRAlpha(summaryCard1, a);
-        SetSRAlpha(summaryCard2, a);
-        SetSRAlpha(summaryCard3, a);
-        if (summaryOverlay1 != null) summaryOverlay1.alpha = a;
-        if (summaryOverlay2 != null) summaryOverlay2.alpha = a;
-        if (summaryOverlay3 != null) summaryOverlay3.alpha = a;
+        for (int i = 0; i < _generatedSlots.Count; i++)
+        {
+            if (_generatedSlots[i] != null && _generatedSlots[i].RewardImage != null)
+                SetSRAlpha(_generatedSlots[i].RewardImage, a);
+        }
     }
 
     private static void SetSRAlpha(SpriteRenderer sr, float a)

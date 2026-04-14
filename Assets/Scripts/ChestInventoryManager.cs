@@ -26,34 +26,35 @@ public class ChestInventoryManager : MonoBehaviour
     [Serializable]
     public class ChestData
     {
+        public ChestType chestType;
         public string chestName;
-        public double minReward;
-        public double maxReward;
-
-        public int cardReward;
-        public int turboMin;
-        public int turboMax;
-
         public float unlockDurationSeconds;
-
         public ChestState state;
-        public float remainingTime;
-
-        public bool skipUsed; // -20 mins bir kere
+        public long unlockEndUtcTicks;  // UTC ticks when unlock finishes
+        public bool halfTimeUsed;
 
         public ChestData() { }
+
+        /// <summary>Remaining seconds based on real-time UTC clock.</summary>
+        public float GetRemainingSeconds()
+        {
+            if (state != ChestState.Unlocking) return 0f;
+            if (unlockEndUtcTicks <= 0) return unlockDurationSeconds;
+            var remaining = new DateTime(unlockEndUtcTicks, DateTimeKind.Utc) - DateTime.UtcNow;
+            return Mathf.Max(0f, (float)remaining.TotalSeconds);
+        }
     }
 
     [Serializable]
     private class ChestSaveBlob
     {
         public List<ChestData> chests = new List<ChestData>();
-        public int activeIndex = -1; // unlock olan chest index
     }
 
     [Header("Runtime")]
     [SerializeField] private List<ChestData> chests = new List<ChestData>();
-    [SerializeField] private int activeUnlockIndex = -1;
+
+    public const int MaxChestSlots = 5;
 
     public event Action OnInventoryChanged;
 
@@ -61,190 +62,232 @@ public class ChestInventoryManager : MonoBehaviour
     {
         DLog($"Awake ENTRY — Instance={(Instance != null ? Instance.name + "#" + Instance.GetInstanceID() : "NULL")} this={name}#{GetInstanceID()}");
 
-        if (Instance != null)
+        if (Instance != null && Instance != this)
         {
-            DLog($"Awake — duplicate detected, destroying self ({name}#{GetInstanceID()}). Keeping existing Instance={Instance.name}#{Instance.GetInstanceID()}");
+            DLog($"Awake — duplicate detected, destroying self");
             Destroy(gameObject);
             return;
         }
+
         Instance = this;
+        if (transform.parent != null) transform.SetParent(null);
         DontDestroyOnLoad(gameObject);
         DLog($"Awake — Instance assigned to {name}#{GetInstanceID()}, DontDestroyOnLoad applied");
     }
 
+    /// <summary>
+    /// Returns the existing Instance, or creates one on-demand if missing.
+    /// Use this in cross-scene code where timing cannot be guaranteed.
+    /// </summary>
+    public static ChestInventoryManager EnsureInstance()
+    {
+        if (Instance != null) return Instance;
+
+        // Check for a surviving DDOL object whose static ref was cleared by domain reload
+        Instance = FindObjectOfType<ChestInventoryManager>();
+        if (Instance != null)
+        {
+            Debug.Log($"[ChestInvMgr] EnsureInstance — found orphaned instance {Instance.name}#{Instance.GetInstanceID()}, re-assigned.");
+            return Instance;
+        }
+
+        // Last resort: create from scratch (Bootstrap should have handled this)
+        var go = new GameObject("[Auto] ChestInventoryManager");
+        Instance = go.AddComponent<ChestInventoryManager>();
+        Debug.Log("[ChestInvMgr] EnsureInstance — created new instance from scratch.");
+        return Instance;
+    }
+
     private void OnEnable()
     {
-        DLog($"OnEnable — Instance={(Instance != null ? Instance.name + "#" + Instance.GetInstanceID() : "NULL")} this={name}#{GetInstanceID()}");
+        DLog($"OnEnable — this={name}#{GetInstanceID()}");
     }
 
     private void Start()
     {
-        DLog($"Start — Instance={(Instance != null ? Instance.name + "#" + Instance.GetInstanceID() : "NULL")} chests.Count={chests.Count} activeUnlockIndex={activeUnlockIndex}");
+        DLog($"Start — chests.Count={chests.Count}");
     }
 
     private void OnDestroy()
     {
-        bool wasSelf = (Instance == this);
-        if (wasSelf) Instance = null;
-        DLog($"OnDestroy — wasSelf={wasSelf} Instance is now {(Instance != null ? Instance.name + "#" + Instance.GetInstanceID() : "NULL")}");
+        if (Instance == this) Instance = null;
     }
 
     private void Update()
     {
-        // Tek aktif unlock slot
-        if (activeUnlockIndex < 0 || activeUnlockIndex >= chests.Count) return;
-
-        var cd = chests[activeUnlockIndex];
-        if (cd.state != ChestState.Unlocking) return;
-
-        cd.remainingTime -= Time.deltaTime;
-        if (cd.remainingTime <= 0f)
+        // Check all unlocking chests for UTC-based completion
+        for (int i = 0; i < chests.Count; i++)
         {
-            cd.remainingTime = 0f;
-            cd.state = ChestState.ReadyToOpen;
-            chests[activeUnlockIndex] = cd;
-            NotifyChanged();
-            return;
+            var cd = chests[i];
+            if (cd.state != ChestState.Unlocking) continue;
+            if (cd.GetRemainingSeconds() <= 0f)
+            {
+                cd.state = ChestState.ReadyToOpen;
+                cd.unlockEndUtcTicks = 0;
+                NotifyChanged();
+            }
         }
-
-        chests[activeUnlockIndex] = cd;
     }
 
-    // -------- PUBLIC API --------
+    // ═══════════════ PUBLIC API ═══════════════
+
+    public bool IsInventoryFull => chests.Count >= MaxChestSlots;
+
+    public int ChestCount => chests.Count;
 
     public int GetUnopenedCount()
     {
-        // Opened olanları listeden zaten kaldıracağız; bu yüzden Count yeterli.
-        return chests.Count;
+        int count = 0;
+        for (int i = 0; i < chests.Count; i++)
+        {
+            var s = chests[i].state;
+            if (s != ChestState.OpeningInProgress)
+                count++;
+        }
+        return count;
     }
 
-    public bool HasAnyChest() => chests.Count > 0;
+    public bool HasAnyChest() => GetUnopenedCount() > 0;
 
     public bool HasActiveUnlock()
     {
-        return activeUnlockIndex >= 0 &&
-               activeUnlockIndex < chests.Count &&
-               (chests[activeUnlockIndex].state == ChestState.Unlocking ||
-                chests[activeUnlockIndex].state == ChestState.ReadyToOpen);
+        for (int i = 0; i < chests.Count; i++)
+            if (chests[i].state == ChestState.Unlocking) return true;
+        return false;
     }
+
+    /// <summary>Returns chest data at the given inventory index, or null.</summary>
+    public ChestData GetChestAt(int index)
+    {
+        if (index < 0 || index >= chests.Count) return null;
+        return chests[index];
+    }
+
+    /// <summary>Returns a read-only view of all chests.</summary>
+    public IReadOnlyList<ChestData> GetAllChests() => chests;
 
     public ChestData GetChestToShowInPopup()
     {
-        // Aktif unlock varsa onu göster
-        if (HasActiveUnlock())
-            return chests[activeUnlockIndex];
-
-        // Yoksa en eski chest
-        if (chests.Count > 0)
-            return chests[0];
-
-        return null;
-    }
-
-    public ChestData GetActiveChest()
-    {
-        if (!HasActiveUnlock()) return null;
-        return chests[activeUnlockIndex];
+        return chests.Count > 0 ? chests[0] : null;
     }
 
     public void AddChestFromWorld(Chest worldChest)
     {
         if (worldChest == null) return;
+        if (IsInventoryFull)
+        {
+            Debug.Log("[ChestInvMgr] Inventory full — chest rejected.");
+            return;
+        }
 
+        ChestType type = worldChest.chestType;
         ChestData cd = new ChestData
         {
-            chestName = worldChest.chestName,
-            minReward = worldChest.minReward,
-            maxReward = worldChest.maxReward,
-            cardReward = worldChest.cardReward,
-            turboMin = worldChest.turboMin,
-            turboMax = worldChest.turboMax,
-            unlockDurationSeconds = worldChest.unlockDurationSeconds,
-
+            chestType = type,
+            chestName = ChestTypeConfig.GetDisplayName(type),
+            unlockDurationSeconds = ChestTypeConfig.GetUnlockDuration(type),
             state = ChestState.Idle,
-            remainingTime = worldChest.unlockDurationSeconds,
-            skipUsed = false
+            unlockEndUtcTicks = 0,
+            halfTimeUsed = false
         };
 
         chests.Add(cd);
         NotifyChanged();
+        DLog($"Added chest: {cd.chestName} ({type}), count={chests.Count}");
     }
 
     /// <summary>
-    /// Aktif unlock yoksa en eski chest'i unlock'a sokar.
+    /// Aktif unlock yoksa en eski Idle chest'i unlock'a sokar.
+    /// Skips OpeningInProgress and Completed chests.
     /// </summary>
-    public bool StartUnlockOldest()
-    {
-        if (chests.Count == 0) return false;
-        if (HasActiveUnlock()) return false;
+    // ═══════════════ UNLOCK / TIMER ═══════════════
 
-        var cd = chests[0];
+    /// <summary>Starts the unlock timer for the chest at the given index. One at a time.</summary>
+    public bool StartUnlock(int index)
+    {
+        if (index < 0 || index >= chests.Count) return false;
+        if (HasActiveUnlock()) return false;
+        var cd = chests[index];
         if (cd.state != ChestState.Idle) return false;
 
         cd.state = ChestState.Unlocking;
-        cd.remainingTime = cd.unlockDurationSeconds;
-        chests[0] = cd;
-
-        activeUnlockIndex = 0;
+        cd.unlockEndUtcTicks = (DateTime.UtcNow + TimeSpan.FromSeconds(cd.unlockDurationSeconds)).Ticks;
         NotifyChanged();
+        DLog($"Started unlock: index={index} duration={cd.unlockDurationSeconds}s");
         return true;
+    }
+
+    /// <summary>Legacy: starts the oldest idle chest.</summary>
+    public bool StartUnlockOldest()
+    {
+        for (int i = 0; i < chests.Count; i++)
+            if (chests[i].state == ChestState.Idle) return StartUnlock(i);
+        return false;
     }
 
     /// <summary>
     /// Reklam sonrası -20 dk uygular (1 kere).
     /// </summary>
-    public bool ApplySkip20Minutes()
+    /// <summary>Halves the remaining unlock time (ad reward). Once per chest.</summary>
+    public bool ApplyHalfTime(int index)
     {
-        if (!HasActiveUnlock()) return false;
-
-        var cd = chests[activeUnlockIndex];
+        if (index < 0 || index >= chests.Count) return false;
+        var cd = chests[index];
         if (cd.state != ChestState.Unlocking) return false;
-        if (cd.skipUsed) return false;
+        if (cd.halfTimeUsed) return false;
 
-        cd.skipUsed = true;
-        cd.remainingTime -= 20f * 60f;
-        if (cd.remainingTime <= 0f)
+        cd.halfTimeUsed = true;
+        float remaining = cd.GetRemainingSeconds();
+        float newRemaining = remaining * 0.5f;
+        cd.unlockEndUtcTicks = (DateTime.UtcNow + TimeSpan.FromSeconds(newRemaining)).Ticks;
+        if (newRemaining <= 0f)
         {
-            cd.remainingTime = 0f;
             cd.state = ChestState.ReadyToOpen;
+            cd.unlockEndUtcTicks = 0;
         }
-
-        chests[activeUnlockIndex] = cd;
         NotifyChanged();
+        DLog($"HalfTime applied: index={index} remaining={remaining:F0} -> {newRemaining:F0}");
         return true;
     }
 
-    /// <summary>
-    /// Hazırsa açar, ödülü döndürür ve chest'i listeden kaldırır.
-    /// </summary>
-    public double OpenActiveChestAndGetReward()
+    /// <summary>Legacy compat for old skip flow.</summary>
+    public bool ApplySkip20Minutes()
     {
-        if (!HasActiveUnlock()) return 0;
-
-        var cd = chests[activeUnlockIndex];
-        if (cd.state != ChestState.ReadyToOpen) return 0;
-
-        double reward = UnityEngine.Random.Range((float)cd.minReward, (float)cd.maxReward);
-
-        // ödülü ver
-        if (CurrencyManager.Instance != null)
-            CurrencyManager.Instance.AddMoney(reward);
-
-        // active chest'i kaldır
-        chests.RemoveAt(activeUnlockIndex);
-        activeUnlockIndex = -1;
-
-        // Eğer queue’da chest kaldıysa, onları kaydırmış olduk. (şimdilik unlock otomatik başlamaz)
-        NotifyChanged();
-
-        return reward;
+        int idx = FindFirstUnlockingIndex();
+        if (idx < 0) return false;
+        return ApplyHalfTime(idx);
     }
 
+    /// <summary>Instantly completes unlock by spending nitro coins (per-type cost).</summary>
+    public bool OpenNowByNitro(int index)
+    {
+        if (index < 0 || index >= chests.Count) return false;
+        var cd = chests[index];
+        if (cd.state == ChestState.ReadyToOpen || cd.state == ChestState.OpeningInProgress)
+            return false;
+
+        int cost = ChestTypeConfig.GetOpenNowCost(cd.chestType);
+        if (CurrencyManager.Instance == null) return false;
+        if (!CurrencyManager.Instance.TrySpendNitroCoins(cost)) return false;
+
+        cd.state = ChestState.ReadyToOpen;
+        cd.unlockEndUtcTicks = 0;
+        NotifyChanged();
+        DLog($"OpenNow: index={index} cost={cost} nitro");
+        return true;
+    }
+
+    private int FindFirstUnlockingIndex()
+    {
+        for (int i = 0; i < chests.Count; i++)
+            if (chests[i].state == ChestState.Unlocking) return i;
+        return -1;
+    }
+
+
     // -------- SAVE / LOAD --------
-    // PlayerPrefs key'leri SaveSystem ile uyumlu kullanacağız.
     private const string KEY_CHEST_BLOB = "Save_ChestBlob";
     private const string KEY_PENDING_OPEN_CHEST = "Save_PendingOpenChest";
-
     /// <summary>
     /// Stores a chest to be opened in the next scene (ChestOpenScene).
     /// Call this BEFORE consuming the chest and loading the scene.
@@ -261,7 +304,7 @@ public class ChestInventoryManager : MonoBehaviour
         string json = JsonUtility.ToJson(chest);
         PlayerPrefs.SetString(KEY_PENDING_OPEN_CHEST, json);
         PlayerPrefs.Save();
-        Debug.Log($"[ChestInventoryManager] SetPendingOpenChest: {chest.chestName}, cardReward={chest.cardReward}, minReward={chest.minReward}, maxReward={chest.maxReward}");
+        Debug.Log($"[ChestInventoryManager] SetPendingOpenChest: {chest.chestName}");
     }
 
     /// <summary>
@@ -285,7 +328,7 @@ public class ChestInventoryManager : MonoBehaviour
         try
         {
             var chest = JsonUtility.FromJson<ChestData>(json);
-            Debug.Log($"[ChestInventoryManager] GetPendingOpenChest: {chest?.chestName}, cardReward={chest?.cardReward}");
+            Debug.Log($"[ChestInventoryManager] GetPendingOpenChest: {chest?.chestName}");
             return chest;
         }
         catch (System.Exception e)
@@ -308,8 +351,7 @@ public class ChestInventoryManager : MonoBehaviour
     {
         ChestSaveBlob blob = new ChestSaveBlob
         {
-            chests = chests,
-            activeIndex = activeUnlockIndex
+            chests = chests
         };
 
         string json = JsonUtility.ToJson(blob);
@@ -335,18 +377,23 @@ public class ChestInventoryManager : MonoBehaviour
         {
             var blob = JsonUtility.FromJson<ChestSaveBlob>(json);
             chests = blob != null && blob.chests != null ? blob.chests : new List<ChestData>();
-            activeUnlockIndex = blob != null ? blob.activeIndex : -1;
 
-            // güvenlik
-            if (activeUnlockIndex < 0 || activeUnlockIndex >= chests.Count)
-                activeUnlockIndex = -1;
+            // Apply offline time: check all unlocking chests
+            for (int i = 0; i < chests.Count; i++)
+            {
+                var cd = chests[i];
+                if (cd.state == ChestState.Unlocking && cd.GetRemainingSeconds() <= 0f)
+                {
+                    cd.state = ChestState.ReadyToOpen;
+                    cd.unlockEndUtcTicks = 0;
+                }
+            }
 
             NotifyChanged();
         }
         catch
         {
             chests = new List<ChestData>();
-            activeUnlockIndex = -1;
             NotifyChanged();
         }
     }
@@ -356,94 +403,72 @@ public class ChestInventoryManager : MonoBehaviour
         OnInventoryChanged?.Invoke();
     }
 
-    public bool OpenNowByNitro(int costNitro = 3)
+    // ═══════════════ SESSION-BASED OPENING ═══════════════
+
+    /// <summary>
+    /// Transitions the chest at given index to OpeningInProgress.
+    /// Returns the chest data, or null if ineligible.
+    /// </summary>
+    public ChestData MarkChestAsOpening(int index)
     {
-        // Chest yoksa
-        if (chests == null || chests.Count == 0) return false;
+        if (index < 0 || index >= chests.Count) return null;
+        var cd = chests[index];
+        if (cd.state != ChestState.ReadyToOpen) return null;
 
-        // Para kontrol
-        if (CurrencyManager.Instance == null) return false;
-        if (!CurrencyManager.Instance.TrySpendNitroCoins(costNitro)) return false;
+        cd.state = ChestState.OpeningInProgress;
+        NotifyChanged();
+        Debug.Log($"[ChestInvMgr] Chest '{cd.chestName}' marked as OpeningInProgress (index={index}).");
+        return cd;
+    }
 
-        // Hangi chest üzerinde işlem yapacağız?
-        int idx = -1;
-
-        // Aktif unlock varsa onu target al
-        if (HasActiveUnlock())
+    /// <summary>Legacy: marks the first ReadyToOpen chest as opening.</summary>
+    public ChestData MarkChestAsOpening()
+    {
+        for (int i = 0; i < chests.Count; i++)
         {
-            idx = activeUnlockIndex;
+            if (chests[i].state == ChestState.ReadyToOpen)
+                return MarkChestAsOpening(i);
         }
-        else
+        return null;
+    }
+
+    /// <summary>
+    /// Removes the first chest in OpeningInProgress state from the inventory.
+    /// Called by ChestSessionManager after rewards are committed.
+    /// </summary>
+    public bool RemoveOpeningChest()
+    {
+        for (int i = 0; i < chests.Count; i++)
         {
-            // aktif unlock yoksa en eski chest (index 0)
-            idx = 0;
-            activeUnlockIndex = 0; // Open butonu "active" üzerinden açtığı için bunu set ediyoruz
+            if (chests[i].state == ChestState.OpeningInProgress)
+            {
+                Debug.Log($"[ChestInvMgr] Removing OpeningInProgress chest at index {i}.");
+                chests.RemoveAt(i);
+                NotifyChanged();
+                return true;
+            }
         }
+        Debug.LogWarning("[ChestInvMgr] RemoveOpeningChest: no OpeningInProgress chest found.");
+        return false;
+    }
 
-        if (idx < 0 || idx >= chests.Count) return false;
-
-        var cd = chests[idx];
-
-        // Zaten açılabiliyorsa boşa coin harcamayalım (istersen true döndürüp kesmeyi engelleriz)
-        if (cd.state == ChestState.ReadyToOpen)
+    /// <summary>
+    /// Reverts the first OpeningInProgress chest back to ReadyToOpen.
+    /// Used for crash recovery when rewards were NOT committed.
+    /// </summary>
+    public bool RevertOpeningChestToReady()
+    {
+        for (int i = 0; i < chests.Count; i++)
         {
-            // Coin harcamasın diye geri iade etmek istersen:
-            CurrencyManager.Instance.AddNitroCoins(costNitro);
-            return false;
+            if (chests[i].state == ChestState.OpeningInProgress)
+            {
+                var cd = chests[i];
+                cd.state = ChestState.ReadyToOpen;
+                NotifyChanged();
+                Debug.Log($"[ChestInvMgr] Reverted chest to ReadyToOpen (index={i}).");
+                return true;
+            }
         }
-
-        // Direkt hazır hale getir
-        cd.state = ChestState.ReadyToOpen;
-        cd.remainingTime = 0f;
-
-        chests[idx] = cd;
-
-        NotifyChanged();
-        return true;
+        return false;
     }
-
-    public bool ConsumeActiveReadyChest()
-    {
-        if (!HasActiveUnlock()) return false;
-
-        var cd = chests[activeUnlockIndex];
-        if (cd.state != ChestState.ReadyToOpen) return false;
-
-        chests.RemoveAt(activeUnlockIndex);
-        activeUnlockIndex = -1;
-
-        NotifyChanged();
-        return true;
-    }
-
-    public bool ConsumeReadyChestForOpening()
-    {
-        if (!HasActiveUnlock()) return false;
-
-        var cd = chests[activeUnlockIndex];
-        if (cd.state != ChestState.ReadyToOpen) return false;
-
-        // chest’i tüket (artık “opened say”)
-        chests.RemoveAt(activeUnlockIndex);
-        activeUnlockIndex = -1;
-
-        NotifyChanged();
-        return true;
-    }
-    public bool ConsumeActiveChest_NoReward()
-    {
-        if (!HasActiveUnlock()) return false;
-
-        var cd = chests[activeUnlockIndex];
-        if (cd.state != ChestState.ReadyToOpen) return false;
-
-        // chest'i listeden kaldır
-        chests.RemoveAt(activeUnlockIndex);
-        activeUnlockIndex = -1;
-
-        NotifyChanged();
-        return true;
-    }
-
-
 }

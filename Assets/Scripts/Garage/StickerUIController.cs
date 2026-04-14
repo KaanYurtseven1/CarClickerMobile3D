@@ -123,6 +123,24 @@ public class StickerUIController : MonoBehaviour
         onStickerSelected?.Invoke(index);
     }
 
+    // ══════════════════ Affordability API ══════════════════
+
+    /// <summary>Sets the affordability visual (dim/bright) for a specific sticker slot.</summary>
+    public void SetSlotAffordable(int index, bool canAfford, bool owned)
+    {
+        if (index < 0 || index >= 6 || _slotImages[index] == null) return;
+        Color c = _slotImages[index].color;
+        c.a = canAfford ? 1f : 0.35f;
+        _slotImages[index].color = c;
+    }
+
+    /// <summary>Shake feedback when player can't afford this sticker.</summary>
+    public void ShakeSlot(int index)
+    {
+        if (index < 0 || index >= 6 || _slotRects[index] == null) return;
+        GarageAffordabilityHelper.ShakeButton(_slotRects[index]);
+    }
+
     // ══════════════════ Public API ══════════════════
 
     /// <summary>

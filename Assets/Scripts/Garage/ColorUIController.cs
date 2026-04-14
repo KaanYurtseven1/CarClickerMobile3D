@@ -90,6 +90,27 @@ public class ColorUIController : MonoBehaviour
 
     // ══════════════════ Public API ══════════════════
 
+    /// <summary>Sets the affordability visual (dim/bright) for a specific color button.</summary>
+    public void SetButtonAffordable(int index, bool canAfford, bool owned)
+    {
+        if (index < 0 || index >= 6 || _buttonRects[index] == null) return;
+        // Use CanvasGroup if present, otherwise dim the button image
+        Image img = _buttonRects[index].GetComponent<Image>();
+        if (img != null)
+        {
+            Color c = img.color;
+            c.a = canAfford ? 1f : 0.35f;
+            img.color = c;
+        }
+    }
+
+    /// <summary>Shake feedback when player can't afford this color.</summary>
+    public void ShakeButton(int index)
+    {
+        if (index < 0 || index >= 6 || _buttonRects[index] == null) return;
+        GarageAffordabilityHelper.ShakeButton(_buttonRects[index]);
+    }
+
     /// <summary>
     /// Updates the 6 color swatches and applies a selection visual (scale).
     /// First call applies instantly; subsequent calls animate via DOTween.

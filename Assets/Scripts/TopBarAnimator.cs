@@ -1,9 +1,28 @@
 using UnityEngine;
 using DG.Tweening;
+using System;
+using System.Collections.Generic;
 
 public class TopBarAnimator : MonoBehaviour
 {
     public static TopBarAnimator Instance { get; private set; }
+
+    /// <summary>Fired after the compact/expand transition finishes. Parameter = isCompact.</summary>
+    public event Action<bool> OnCompactChanged;
+
+    public bool IsCompact => isCompact;
+
+    // CanvasGroups excluded from compact/expand transitions.
+    // Controllers that manage their own visibility (e.g. BoostModeController)
+    // should call ExcludeFromCompact so TopBarAnimator doesn't fight over SetActive/alpha.
+    private readonly HashSet<CanvasGroup> _excludedGroups = new HashSet<CanvasGroup>();
+
+    /// <summary>Exclude a CanvasGroup from compact/expand transitions.
+    /// The excluded CG will not be faded, activated, or deactivated by TopBarAnimator.</summary>
+    public void ExcludeFromCompact(CanvasGroup cg) { if (cg != null) _excludedGroups.Add(cg); }
+
+    /// <summary>Re-include a previously excluded CanvasGroup in compact/expand transitions.</summary>
+    public void IncludeInCompact(CanvasGroup cg) { if (cg != null) _excludedGroups.Remove(cg); }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
@@ -123,7 +142,7 @@ public class TopBarAnimator : MonoBehaviour
                 // Hepsini aynı anda fade-out başlat
                 foreach (var cg in hideGroups)
                 {
-                    if (!cg) continue;
+                    if (!cg || _excludedGroups.Contains(cg)) continue;
                     cg.interactable = false;
                     cg.blocksRaycasts = false;
                     // aktif kalsın ki fade çalışsın
@@ -136,7 +155,7 @@ public class TopBarAnimator : MonoBehaviour
                 {
                     foreach (var cg in hideGroups)
                     {
-                        if (!cg) continue;
+                        if (!cg || _excludedGroups.Contains(cg)) continue;
                         cg.gameObject.SetActive(false);
                     }
                 });
@@ -148,7 +167,7 @@ public class TopBarAnimator : MonoBehaviour
                 {
                     foreach (var cg in hideGroups)
                     {
-                        if (!cg) continue;
+                        if (!cg || _excludedGroups.Contains(cg)) continue;
                         cg.gameObject.SetActive(true);
                         cg.alpha = 0f;
                         cg.interactable = false;
@@ -159,7 +178,7 @@ public class TopBarAnimator : MonoBehaviour
                 // Hepsini aynı anda fade-in
                 foreach (var cg in hideGroups)
                 {
-                    if (!cg) continue;
+                    if (!cg || _excludedGroups.Contains(cg)) continue;
                     seq.Join(cg.DOFade(1f, duration * 0.8f).SetEase(Ease.OutQuad));
                 }
 
@@ -168,13 +187,17 @@ public class TopBarAnimator : MonoBehaviour
                 {
                     foreach (var cg in hideGroups)
                     {
-                        if (!cg) continue;
+                        if (!cg || _excludedGroups.Contains(cg)) continue;
                         cg.interactable = true;
                         cg.blocksRaycasts = true;
                     }
                 });
             }
         }
+
+        // Notify subscribers after the transition completes
+        bool compactCapture = compact;
+        seq.OnComplete(() => OnCompactChanged?.Invoke(compactCapture));
 
         seq.Play();
     }

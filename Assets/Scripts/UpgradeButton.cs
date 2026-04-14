@@ -18,17 +18,17 @@ public class UpgradeButton : MonoBehaviour
     public Button button;
 
     [Header("Economy")]
-    public double baseCost = 10;
+    public double baseCost = 25;
     public double costMultiplier = 1.15;
 
     // Tap upgrade için
-    public double tapIncreasePerLevel = 1;
+    public double tapIncreasePerLevel = 3;
 
     // MPS upgrade için
-    public double mpsIncreasePerLevel = 1;
+    public double mpsIncreasePerLevel = 2;
 
     // Global upgrade için (örn. 0.1 = %10 artış)
-    public double globalMultiplierPerLevel = 0.1;
+    public double globalMultiplierPerLevel = 0.12;
 
     [Header("Runtime")]
     public int currentLevel = 0;
@@ -84,6 +84,9 @@ public class UpgradeButton : MonoBehaviour
         }
 
         currentLevel++;
+
+        // Sync to DDOL registry so save works from any scene
+        SyncToRegistry();
 
         // Notify CardManager for purchase-based activations
         if (CardManager.Instance != null)
@@ -149,6 +152,7 @@ public class UpgradeButton : MonoBehaviour
         currentLevel = level;
         currentCost = baseCost * Math.Pow(costMultiplier, currentLevel);
         RefreshUI(true);
+        SyncToRegistry();
     }
 
     /// <summary>
@@ -170,6 +174,7 @@ public class UpgradeButton : MonoBehaviour
                 cm.IncreaseMPS(mpsIncreasePerLevel * currentLevel);
                 break;
             case UpgradeType.Global:
+
                 double factor = Math.Pow(1.0 + globalMultiplierPerLevel, currentLevel);
                 cm.moneyPerTap *= factor;
                 cm.moneyPerSecond *= factor;
@@ -180,5 +185,11 @@ public class UpgradeButton : MonoBehaviour
     public int GetCurrentLevel()
     {
         return currentLevel;
+    }
+
+    private void SyncToRegistry()
+    {
+        if (UpgradeSaveRegistry.Instance != null)
+            UpgradeSaveRegistry.Instance.Register(upgradeType.ToString(), currentLevel);
     }
 }

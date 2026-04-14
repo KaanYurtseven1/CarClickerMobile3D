@@ -25,8 +25,8 @@ public class Radar : MonoBehaviour
     // ==================== CONFIGURATION ====================
 
     [Header("Movement")]
-    [Tooltip("Movement speed along -Z. Leave 0 to auto-read from RoadLooper at spawn.")]
-    [SerializeField] private float moveSpeed = 0f;
+    [Tooltip("Independent radar scroll speed (units/second). Not tied to road speed.")]
+    [SerializeField] private float moveSpeed = 15f;
 
     [Header("Despawn")]
     [Tooltip("Z position at which the radar counts as missed and is destroyed.")]
@@ -48,30 +48,15 @@ public class Radar : MonoBehaviour
 
     // ==================== LIFECYCLE ====================
 
-    private void Start()
-    {
-        // Auto-read road speed if moveSpeed was left at 0
-        if (moveSpeed <= 0f)
-        {
-            RoadLooper rl = FindFirstObjectByType<RoadLooper>();
-            if (rl != null)
-            {
-                moveSpeed = rl.speed;
-            }
-            else
-            {
-                moveSpeed = 5f; // fallback
-                Debug.LogWarning("[Radar] RoadLooper not found, using fallback speed 5.");
-            }
-        }
-    }
+    /// <summary>Uses the local moveSpeed field (independent from road scroll speed).</summary>
+    private float CurrentSpeed => moveSpeed;
 
     private void Update()
     {
         if (!isAlive) return;
 
         // Move in -Z to match road scroll direction
-        transform.position += Vector3.back * moveSpeed * Time.deltaTime;
+        transform.position += Vector3.back * CurrentSpeed * Time.deltaTime;
 
         // Despawn check
         if (transform.position.z <= despawnZ)
@@ -94,10 +79,18 @@ public class Radar : MonoBehaviour
         if (!_handled)
         {
             _handled = true;
+
+            // P8: Radar defuse SFX
+            if (SFXManager.Instance != null)
+                SFXManager.Instance.PlayRadarDefuse();
+
             if (PopularityManager.Instance != null)
             {
                 PopularityManager.Instance.AddPopularityNormalized(
                     -popularityDelta, "RadarDefuse", this);
+
+                // Notify AmbientHeatManager (and any other subscribers) that a radar was defused
+                PopularityManager.Instance.NotifyRadarDefused();
             }
         }
 
@@ -147,6 +140,10 @@ public class Radar : MonoBehaviour
         }
         _handled = true;
 
+        // P9: Radar miss SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayRadarMiss();
+
         // Increase popularity by exactly +1 on the 0–100 scale (0.01 normalized)
         if (PopularityManager.Instance != null)
         {
@@ -162,7 +159,8 @@ public class Radar : MonoBehaviour
         }
 
         // Show radar snapshot popup (pass side for camera pose selection)
-        if (RadarPopupController.Instance != null)
+        // Suppress popup when a non-Clicker bottom bar panel is open
+        if (RadarPopupController.Instance != null && !UIFlowState.IsContentPanelOpen)
         {
             RadarPopupController.Instance.ShowSnapshot(Side);
         }

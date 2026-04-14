@@ -21,11 +21,19 @@
 //     it around Y.  On exit the rotation returns to default.
 //   • No gameplay logic is changed anywhere.
 // ════════════════════════════════════════════════════════════════
+using System;
 using UnityEngine;
 using DG.Tweening;
 
 public class GarageFocusController : MonoBehaviour
 {
+    // ─── Public API for external integration ───
+    /// <summary>Fires after focus/inspect mode fully exits (animation complete, canvas restored).</summary>
+    public event Action OnFocusExited;
+
+    /// <summary>True while the camera is in close-up inspect mode.</summary>
+    public bool IsFocusMode => _isFocusMode;
+
     // ─── Inspector References ───
     [Header("─── References ───")]
     [Tooltip("Main Camera in the scene.")]
@@ -371,9 +379,19 @@ public class GarageFocusController : MonoBehaviour
 
             canvasGroup.alpha = 1f;
             _isAnimating = false;
+
+            // Notify listeners (e.g. BuyPopupController) that inspect mode ended
+            OnFocusExited?.Invoke();
         });
 
         _activeSequence = seq;
+    }
+
+    /// <summary>Programmatically enter focus/inspect mode (used by BuyPopup Incele flow).</summary>
+    public void RequestEnterFocus()
+    {
+        if (_isFocusMode || _isAnimating) return;
+        EnterFocusMode();
     }
 
     // ══════════════════ Tween Cleanup ══════════════════

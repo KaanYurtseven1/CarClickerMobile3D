@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
+using DG.Tweening;
 
 /// <summary>
 /// Nitro Magnet card: After N taps, arms magnet to auto-collect K nitro coins.
@@ -21,6 +22,19 @@ using System.Collections.Generic;
 public class NitroMagnetController : MonoBehaviour
 {
     public static NitroMagnetController Instance { get; private set; }
+
+    /// <summary>
+    /// Fired when a coin is collected by the magnet. Passes reward amount.
+    /// Used by BlacklistStatTracker to count lifetime magnet coin collections.
+    /// </summary>
+    public static event System.Action<int> OnMagnetCoinCollected;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatics()
+    {
+        Instance = null;
+        OnMagnetCoinCollected = null;
+    }
 
     [Header("References")]
     [Tooltip("Transform where coins will be pulled to (e.g., MagnetAnchor near car)")]
@@ -71,6 +85,20 @@ public class NitroMagnetController : MonoBehaviour
     [Header("Debug")]
     [SerializeField] private bool enableDebugLogs = true;
 
+    // ── VFX Fade Settings ──
+    [Header("VFX Fade & Coin-Proximity Monitoring")]
+    [Tooltip("Duration of the shield VFX fade-in (seconds)")]
+    public float vfxFadeInDuration = 0.35f;
+
+    [Tooltip("Duration of the shield VFX fade-out (seconds)")]
+    public float vfxFadeOutDuration = 0.25f;
+
+    [Tooltip("Z threshold: VFX activates when any NitroCoin's Z drops below this value (meaning it has moved toward the player). Coins spawn at Z≈74 and travel toward Z≈-7.")]
+    public float coinZThreshold = 42f;
+
+    [Tooltip("How often to scan for NitroCoins near the player (seconds)")]
+    public float vfxMonitorInterval = 0.12f;
+
     // ── State ──
     private bool isArmed = false;
     private int currentTapCount = 0;
@@ -98,6 +126,34 @@ public class NitroMagnetController : MonoBehaviour
     // ── Bounds check interval ──
     private const float BoundsCheckInterval = 0.1f;
 
+    // ── Nitro Rain Synergy ──
+    private bool _nitroRainActive = false;
+    private bool _subscribedToRain = false;
+    private bool _postRainDraining = false;
+
+    // ── Cooldown System ──
+    [Header("Cooldown (seconds per level: L1=60, L2=90, L3=120, …  +30 each)")]
+    [Tooltip("Base cooldown at level 1 in seconds")]
+    [SerializeField] private float cooldownBase = 60f;
+    [Tooltip("Seconds added per level above 1")]
+    [SerializeField] private float cooldownPerLevel = 30f;
+    [Tooltip("Cooldown multiplier when Nitro Rain overlapped with the magnet session")]
+    [SerializeField] private float rainCooldownMultiplier = 2f;
+
+    private bool _isOnCooldown = false;
+    private float _cooldownEndTime = 0f;
+    private bool _rainOverlappedThisSession = false;
+
+    private const string SaveKey_CooldownEnd = "Save_NitroMagnet_CooldownEnd";
+    private const string SaveKey_CooldownActive = "Save_NitroMagnet_CooldownActive";
+
+    // ── VFX Fade State ──
+    private Vector3 _shieldOriginalScale;
+    private bool _shieldScaleCached;
+    private bool _vfxVisible;           // current visual state
+    private Tween _vfxFadeTween;        // active scale tween
+    private Coroutine _vfxMonitorRoutine;
+
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -117,9 +173,15 @@ public class NitroMagnetController : MonoBehaviour
         // Load saved state
         LoadState();
 
-        // Apply VFX to match loaded state
+        // Apply VFX to match loaded state —
+        // VFX starts hidden; monitoring coroutine will fade it in when coins approach
         if (shieldVFX != null)
-            shieldVFX.SetActive(isArmed);
+        {
+            CacheShieldScale();
+            shieldVFX.transform.localScale = Vector3.zero;
+            shieldVFX.SetActive(true); // keep active so DOTween can animate it
+            _vfxVisible = false;
+        }
 
         if (magnetTarget == null)
             Debug.LogError("[NitroMagnetController] magnetTarget is NULL! Assign MagnetAnchor in Inspector.");
@@ -128,21 +190,98 @@ public class NitroMagnetController : MonoBehaviour
         if (tapsRequired.Length != coinsToCollect.Length)
             Debug.LogError("[NitroMagnetController] tapsRequired and coinsToCollect arrays must have same length!");
 
-        // If loaded as armed, start bounds check coroutine
+        TrySubscribeToRain();
+
+        // If loaded as armed, start bounds check coroutine and VFX monitor
         if (isArmed)
+        {
             StartBoundsCheck();
+            StartVFXMonitor();
+        }
     }
 
     private void Update()
     {
-        // Arm timeout check
-        if (isArmed && maxArmedDuration > 0f)
+        // Lazy-bind to NitroRainController if it wasn't ready at Start()
+        if (!_subscribedToRain)
+            TrySubscribeToRain();
+
+        // ── Cooldown expiration ──
+        if (_isOnCooldown && Time.time >= _cooldownEndTime)
+        {
+            _isOnCooldown = false;
+            SaveState();
+
+            if (enableDebugLogs)
+                Debug.Log("[NitroMagnet] Cooldown EXPIRED — magnet can be armed again");
+        }
+
+        // Arm timeout check — skip timeout while rain synergy is active
+        if (isArmed && maxArmedDuration > 0f && !_nitroRainActive)
         {
             if (Time.time - armTime >= maxArmedDuration)
             {
                 DisarmMagnet("timeout");
             }
         }
+    }
+
+    // ══════════════════════════════════════════
+    //  CAR REBIND (called by MainSceneCarController)
+    // ══════════════════════════════════════════
+
+    /// <summary>
+    /// Rebinds magnetTarget, shieldVFX, and areaCollider to the children
+    /// of the given car root.  Each car has its own MagnetAnchor hierarchy:
+    ///   CarRoot/MagnetAnchor → Plasma Sphere (shield) + NitroMagnetArea (trigger).
+    /// </summary>
+    public void RefreshCarReferences(Transform activeCar)
+    {
+        if (activeCar == null) return;
+
+        // Find MagnetAnchor under the active car (could be named MagnetAnchor, MagnetAnchor (1), etc.)
+        Transform anchor = FindChildByPrefix(activeCar, "MagnetAnchor");
+        if (anchor != null)
+        {
+            magnetTarget = anchor;
+
+            // Shield VFX: first child named "Plasma Sphere*"
+            Transform shield = FindChildByPrefix(anchor, "Plasma Sphere");
+            if (shield != null)
+                shieldVFX = shield.gameObject;
+
+            // Area collider: child named "NitroMagnetArea*"
+            Transform area = FindChildByPrefix(anchor, "NitroMagnetArea");
+            if (area != null)
+            {
+                Collider col = area.GetComponent<Collider>();
+                if (col != null)
+                    areaCollider = col;
+            }
+
+            Debug.Log($"[NitroMagnet] Rebound to {activeCar.name}: anchor={anchor.name}, shield={shieldVFX?.name}, area={areaCollider?.name}");
+        }
+        else
+        {
+            Debug.LogWarning($"[NitroMagnet] MagnetAnchor not found under {activeCar.name}");
+        }
+    }
+
+    /// <summary>Finds a direct child whose name starts with the given prefix.</summary>
+    private static Transform FindChildByPrefix(Transform parent, string prefix)
+    {
+        foreach (Transform child in parent)
+        {
+            if (child.name.StartsWith(prefix))
+                return child;
+        }
+        // Recursive fallback for nested prefabs
+        foreach (Transform child in parent)
+        {
+            Transform found = FindChildByPrefix(child, prefix);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     // ══════════════════════════════════════════
@@ -164,6 +303,9 @@ public class NitroMagnetController : MonoBehaviour
 
         if (isArmed)
             return; // Already armed, don't count more taps
+
+        if (_isOnCooldown)
+            return; // Cooldown active, block activation
 
         currentTapCount++;
 
@@ -246,8 +388,8 @@ public class NitroMagnetController : MonoBehaviour
                 continue;
             }
 
-            // Quota already full (reservation)?
-            if (coinsCollected + inFlightCoins.Count >= quota)
+            // Quota already full (reservation)? Skip during rain synergy or post-rain drain.
+            if (!_nitroRainActive && !_postRainDraining && coinsCollected + inFlightCoins.Count >= quota)
                 break; // no point checking more
 
             if (IsInsideArea(coin.transform.position))
@@ -256,6 +398,8 @@ public class NitroMagnetController : MonoBehaviour
                 TryAcceptCoin(coin);
             }
         }
+
+        CheckDrainComplete();
     }
 
     // ══════════════════════════════════════════
@@ -296,8 +440,8 @@ public class NitroMagnetController : MonoBehaviour
         if (inFlightCoins.ContainsKey(coinId))
             return false;
 
-        // ── RESERVATION GATE ──
-        if (coinsCollected + inFlightCoins.Count >= quota)
+        // ── RESERVATION GATE ── (bypassed during Nitro Rain synergy or post-rain drain)
+        if (!_nitroRainActive && !_postRainDraining && coinsCollected + inFlightCoins.Count >= quota)
             return false;
 
         // Reserve slot
@@ -359,6 +503,8 @@ public class NitroMagnetController : MonoBehaviour
 
         coinsCollected++;
 
+        OnMagnetCoinCollected?.Invoke(rewardAmount);
+
         if (enableDebugLogs)
         {
             Debug.Log($"[CardEffectApplied] NitroMagnet coin collected by magnet (coinId:{coinId}, reward:{rewardAmount}, collected:{coinsCollected}/{quota})");
@@ -367,11 +513,13 @@ public class NitroMagnetController : MonoBehaviour
         // Reset arm timer on each collection (prevents timeout while actively collecting)
         armTime = Time.time;
 
-        // Check if quota fulfilled
-        if (coinsCollected >= quota)
+        // Check if quota fulfilled (skip during rain synergy or post-rain drain — magnet stays armed)
+        if (!_nitroRainActive && !_postRainDraining && coinsCollected >= quota)
         {
             DisarmMagnet("quota_reached");
         }
+
+        CheckDrainComplete();
 
         SaveState();
     }
@@ -407,11 +555,19 @@ public class NitroMagnetController : MonoBehaviour
         isArmed = true;
         currentTapCount = 0;
         coinsCollected = 0;
+        _rainOverlappedThisSession = false;
         quota = GetCoinsToCollect(magnetLevel);
         armTime = Time.time;
 
         if (shieldVFX != null)
+        {
+            // VFX starts hidden; the monitoring coroutine will fade it in
+            // once NitroCoins cross the Z threshold.
+            CacheShieldScale();
+            shieldVFX.transform.localScale = Vector3.zero;
             shieldVFX.SetActive(true);
+            _vfxVisible = false;
+        }
 
         if (enableDebugLogs)
         {
@@ -421,8 +577,14 @@ public class NitroMagnetController : MonoBehaviour
 
         SaveState();
 
+        // N9: Magnet shield activation SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayMagnetActivate();
+
         // Start periodic bounds check coroutine
         StartBoundsCheck();
+
+        // Start VFX proximity monitoring
+        StartVFXMonitor();
 
         // Check for coins already inside area (Physics.OverlapBox)
         CheckForExistingCoinsInArea();
@@ -438,8 +600,9 @@ public class NitroMagnetController : MonoBehaviour
 
         isArmed = false;
 
-        if (shieldVFX != null)
-            shieldVFX.SetActive(false);
+        // Fade out VFX smoothly instead of instant disable
+        FadeOutVFX();
+        StopVFXMonitor();
 
         StopBoundsCheck();
 
@@ -451,8 +614,15 @@ public class NitroMagnetController : MonoBehaviour
 
         inFlightCoins.Clear();
         trackedCoins.Clear();
+        _postRainDraining = false;
         quota = 0;
         coinsCollected = 0;
+
+        // ── Start cooldown ──
+        StartCooldown();
+
+        // N11: Magnet shield deactivation SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayMagnetDeactivate();
 
         SaveState();
     }
@@ -466,7 +636,34 @@ public class NitroMagnetController : MonoBehaviour
     }
 
     /// <summary>
-    /// Cancels all currently in-flight coin pulls.
+    /// DEBUG ONLY: Immediately arms the magnet regardless of tap count.
+    /// Uses the current card level, or the given level override.
+    /// </summary>
+    public void DebugForceArm(int levelOverride = -1)
+    {
+        int level = levelOverride >= 1 ? levelOverride : 1;
+        if (CardManager.Instance != null)
+        {
+            int cardLevel = CardManager.Instance.GetCardLevel(CardType.NitroMagnet);
+            if (cardLevel >= 1 && levelOverride < 1)
+                level = cardLevel;
+        }
+
+        if (isArmed)
+            DisarmMagnet("debug_rearm");
+
+        // Clear cooldown for debug arming
+        _isOnCooldown = false;
+        _cooldownEndTime = 0f;
+
+        ArmMagnet(level);
+        Debug.Log($"[DebugCardLoadout] NitroMagnet force-armed at level {level}");
+    }
+
+    /// <summary>
+    /// Cancels all currently in-flight coin pulls and destroys the coins.
+    /// Mid-pull coins are removed rather than resuming normal movement
+    /// (which would cause them to shoot off-screen).
     /// </summary>
     private void CancelAllInFlightCoins(string reason)
     {
@@ -476,6 +673,7 @@ public class NitroMagnetController : MonoBehaviour
             if (coin != null)
             {
                 coin.CancelMagnetPull(reason);
+                Destroy(coin.gameObject);
             }
         }
     }
@@ -564,6 +762,8 @@ public class NitroMagnetController : MonoBehaviour
     // ══════════════════════════════════════════
 
     public bool IsArmed => isArmed;
+    public bool IsOnCooldown => _isOnCooldown;
+    public float CooldownRemainingSeconds => _isOnCooldown ? Mathf.Max(0f, _cooldownEndTime - Time.time) : 0f;
     public int CurrentTapCount => currentTapCount;
     public int Quota => quota;
     public int CoinsCollected => coinsCollected;
@@ -580,6 +780,26 @@ public class NitroMagnetController : MonoBehaviour
         PlayerPrefs.SetInt(SaveKey_IsArmed, isArmed ? 1 : 0);
         PlayerPrefs.SetInt(SaveKey_Quota, quota);
         PlayerPrefs.SetInt(SaveKey_Collected, coinsCollected);
+
+        // Persist cooldown as UTC end time so offline time counts toward expiry
+        PlayerPrefs.SetInt(SaveKey_CooldownActive, _isOnCooldown ? 1 : 0);
+        if (_isOnCooldown)
+        {
+            double remainingSec = _cooldownEndTime - Time.time;
+            if (remainingSec > 0)
+            {
+                long utcEnd = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() + (long)System.Math.Ceiling(remainingSec);
+                PlayerPrefs.SetString(SaveKey_CooldownEnd, utcEnd.ToString());
+            }
+            else
+            {
+                PlayerPrefs.SetString(SaveKey_CooldownEnd, "0");
+            }
+        }
+        else
+        {
+            PlayerPrefs.SetString(SaveKey_CooldownEnd, "0");
+        }
     }
 
     public void LoadState()
@@ -601,13 +821,332 @@ public class NitroMagnetController : MonoBehaviour
             quota = 0;
             coinsCollected = 0;
         }
+
+        // Restore cooldown from UTC end timestamp (offline time counted)
+        bool hadCooldown = PlayerPrefs.GetInt(SaveKey_CooldownActive, 0) == 1;
+        if (hadCooldown)
+        {
+            string endStr = PlayerPrefs.GetString(SaveKey_CooldownEnd, "0");
+            // Backward compat: old saves stored a float via SetFloat (key type may differ)
+            if (!long.TryParse(endStr, out long utcEnd))
+            {
+                // Fallback: try reading as old float format (seconds remaining)
+                float oldRemaining = PlayerPrefs.GetFloat(SaveKey_CooldownEnd, 0f);
+                if (oldRemaining > 0f)
+                {
+                    _isOnCooldown = true;
+                    _cooldownEndTime = Time.time + oldRemaining;
+                }
+                else
+                {
+                    _isOnCooldown = false;
+                    _cooldownEndTime = 0f;
+                }
+            }
+            else
+            {
+                long nowUtc = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                long remaining = utcEnd - nowUtc;
+                if (remaining > 0)
+                {
+                    _isOnCooldown = true;
+                    _cooldownEndTime = Time.time + remaining;
+                }
+                else
+                {
+                    // Cooldown expired while offline
+                    _isOnCooldown = false;
+                    _cooldownEndTime = 0f;
+                }
+            }
+        }
+        else
+        {
+            _isOnCooldown = false;
+            _cooldownEndTime = 0f;
+        }
     }
 
     private void OnDestroy()
     {
         StopBoundsCheck();
+        StopVFXMonitor();
+        KillVFXTween();
+        UnsubscribeFromRain();
         if (Instance == this)
             Instance = null;
+    }
+
+    // ══════════════════════════════════════════
+    //  NITRO RAIN SYNERGY
+    // ══════════════════════════════════════════
+
+    private void TrySubscribeToRain()
+    {
+        if (_subscribedToRain) return;
+        var nrc = NitroRainController.Instance;
+        if (nrc == null) return;
+
+        nrc.OnRainStarted += HandleNitroRainStarted;
+        nrc.OnRainEnded += HandleNitroRainEnded;
+        _subscribedToRain = true;
+    }
+
+    private void UnsubscribeFromRain()
+    {
+        if (!_subscribedToRain) return;
+        var nrc = NitroRainController.Instance;
+        if (nrc != null)
+        {
+            nrc.OnRainStarted -= HandleNitroRainStarted;
+            nrc.OnRainEnded -= HandleNitroRainEnded;
+        }
+        _subscribedToRain = false;
+    }
+
+    /// <summary>
+    /// When Nitro Rain starts while magnet is armed, activate synergy:
+    /// quota is bypassed so the magnet can pull all coins that enter the area.
+    /// Coins still must enter the NitroMagnetArea BoxCollider before pull/VFX starts.
+    /// </summary>
+    private void HandleNitroRainStarted(float duration, int level)
+    {
+        _nitroRainActive = true;
+        _postRainDraining = false;
+
+        if (!isArmed) return;
+
+        // Mark that rain overlapped with this magnet session (doubles cooldown)
+        _rainOverlappedThisSession = true;
+
+        if (enableDebugLogs)
+            Debug.Log($"[NitroMagnet] Rain synergy ACTIVATED — quota bypassed, area detection active");
+
+        // Reset arm timer so timeout doesn't fire during rain
+        armTime = Time.time;
+
+        // Track all existing scene coins so they get picked up when they enter the area
+        TrackAllSceneCoins();
+    }
+
+    /// <summary>
+    /// When Nitro Rain ends, enter drain mode: keep quota bypassed until all
+    /// rain-spawned coins still in transit have been processed (collected or despawned).
+    /// </summary>
+    private void HandleNitroRainEnded()
+    {
+        _nitroRainActive = false;
+
+        if (!isArmed) return;
+
+        // Enter drain mode if there are still rain coins traveling or being pulled
+        if (trackedCoins.Count > 0 || inFlightCoins.Count > 0)
+        {
+            _postRainDraining = true;
+
+            if (enableDebugLogs)
+                Debug.Log($"[NitroMagnet] Rain synergy ENDED — draining remaining coins (tracked:{trackedCoins.Count}, inFlight:{inFlightCoins.Count})");
+        }
+        else
+        {
+            // No coins left, reset counter for fresh quota cycle
+            coinsCollected = 0;
+            _postRainDraining = false;
+
+            if (enableDebugLogs)
+                Debug.Log($"[NitroMagnet] Rain synergy ENDED — no coins to drain");
+        }
+    }
+
+    /// <summary>
+    /// Checks if post-rain drain is complete (all rain coins collected or despawned).
+    /// When complete, resets coinsCollected so the magnet gets a fresh quota cycle.
+    /// </summary>
+    private void CheckDrainComplete()
+    {
+        if (!_postRainDraining) return;
+        if (trackedCoins.Count > 0 || inFlightCoins.Count > 0) return;
+
+        _postRainDraining = false;
+        coinsCollected = 0;
+
+        if (enableDebugLogs)
+            Debug.Log("[NitroMagnet] Post-rain drain complete — resuming normal quota");
+    }
+
+    // ══════════════════════════════════════════
+    //  COOLDOWN
+    // ══════════════════════════════════════════
+
+    /// <summary>
+    /// Returns the cooldown duration in seconds for the given card level.
+    /// Pattern: L1=60s, L2=90s, L3=120s, … (+30s each level).
+    /// Doubled if Nitro Rain overlapped with the magnet session.
+    /// </summary>
+    private float GetCooldownDuration(int level)
+    {
+        float baseDuration = cooldownBase + cooldownPerLevel * Mathf.Max(0, level - 1);
+        if (_rainOverlappedThisSession)
+            baseDuration *= rainCooldownMultiplier;
+        return baseDuration;
+    }
+
+    /// <summary>
+    /// Initiates cooldown after the magnet disarms.
+    /// During cooldown, RegisterTap() rejects all taps.
+    /// </summary>
+    private void StartCooldown()
+    {
+        int magnetLevel = CardManager.Instance != null
+            ? CardManager.Instance.GetCardLevel(CardType.NitroMagnet)
+            : 1;
+        if (magnetLevel <= 0) magnetLevel = 1;
+
+        float duration = GetCooldownDuration(magnetLevel);
+        _isOnCooldown = true;
+        _cooldownEndTime = Time.time + duration;
+
+        if (enableDebugLogs)
+        {
+            string rainTag = _rainOverlappedThisSession ? " (rain 2×)" : "";
+            Debug.Log($"[NitroMagnet] Cooldown STARTED — {duration:F1}s{rainTag} (level:{magnetLevel})");
+        }
+    }
+
+    /// <summary>
+    /// Adds all existing NitroCoins in the scene to the tracked list.
+    /// Those already inside the area are accepted immediately;
+    /// others will be picked up by the periodic bounds check when they enter.
+    /// </summary>
+    private void TrackAllSceneCoins()
+    {
+        NitroCoin[] allCoins = FindObjectsByType<NitroCoin>(FindObjectsSortMode.None);
+        foreach (NitroCoin coin in allCoins)
+        {
+            if (coin == null || coin.IsCollected || coin.IsBeingMagnetPulled)
+                continue;
+
+            if (IsInsideArea(coin.transform.position))
+            {
+                TryAcceptCoin(coin);
+            }
+            else if (!trackedCoins.Contains(coin))
+            {
+                trackedCoins.Add(coin);
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════
+    //  VFX FADE-IN / FADE-OUT (scale-based)
+    // ══════════════════════════════════════════
+
+    private void CacheShieldScale()
+    {
+        if (_shieldScaleCached || shieldVFX == null) return;
+        _shieldOriginalScale = shieldVFX.transform.localScale;
+        if (_shieldOriginalScale == Vector3.zero)
+            _shieldOriginalScale = Vector3.one; // safety fallback
+        _shieldScaleCached = true;
+    }
+
+    private void KillVFXTween()
+    {
+        if (_vfxFadeTween != null && _vfxFadeTween.IsActive())
+        {
+            _vfxFadeTween.Kill();
+            _vfxFadeTween = null;
+        }
+    }
+
+    private void FadeInVFX()
+    {
+        if (shieldVFX == null || _vfxVisible) return;
+        _vfxVisible = true;
+        KillVFXTween();
+
+        CacheShieldScale();
+        shieldVFX.SetActive(true);
+        _vfxFadeTween = shieldVFX.transform
+            .DOScale(_shieldOriginalScale, vfxFadeInDuration)
+            .SetEase(Ease.OutBack)
+            .SetUpdate(true);
+
+        if (enableDebugLogs)
+            Debug.Log("[NitroMagnetVFX] Fade-IN started");
+    }
+
+    private void FadeOutVFX()
+    {
+        if (shieldVFX == null || !_vfxVisible) return;
+        _vfxVisible = false;
+        KillVFXTween();
+
+        _vfxFadeTween = shieldVFX.transform
+            .DOScale(Vector3.zero, vfxFadeOutDuration)
+            .SetEase(Ease.InBack)
+            .SetUpdate(true);
+
+        if (enableDebugLogs)
+            Debug.Log("[NitroMagnetVFX] Fade-OUT started");
+    }
+
+    // ══════════════════════════════════════════
+    //  VFX PROXIMITY MONITOR (coin Z check loop)
+    // ══════════════════════════════════════════
+
+    private void StartVFXMonitor()
+    {
+        if (_vfxMonitorRoutine != null) return;
+        _vfxMonitorRoutine = StartCoroutine(VFXMonitorLoop());
+    }
+
+    private void StopVFXMonitor()
+    {
+        if (_vfxMonitorRoutine != null)
+        {
+            StopCoroutine(_vfxMonitorRoutine);
+            _vfxMonitorRoutine = null;
+        }
+    }
+
+    /// <summary>
+    /// Continuously scans for active NitroCoins that have crossed the Z threshold
+    /// (meaning they've moved close enough to the player). Drives VFX fade-in/out.
+    /// Runs while the magnet is armed.
+    /// </summary>
+    private IEnumerator VFXMonitorLoop()
+    {
+        var wait = new WaitForSeconds(vfxMonitorInterval);
+
+        while (isArmed)
+        {
+            bool anyCoinPastThreshold = false;
+
+            // Scan all live NitroCoins in the scene
+            NitroCoin[] coins = FindObjectsByType<NitroCoin>(FindObjectsSortMode.None);
+            for (int i = 0; i < coins.Length; i++)
+            {
+                NitroCoin c = coins[i];
+                if (c == null || c.IsCollected) continue;
+
+                // Coin has moved past the threshold toward the player
+                if (c.transform.position.z < coinZThreshold)
+                {
+                    anyCoinPastThreshold = true;
+                    break; // one is enough
+                }
+            }
+
+            if (anyCoinPastThreshold && !_vfxVisible)
+                FadeInVFX();
+            else if (!anyCoinPastThreshold && _vfxVisible)
+                FadeOutVFX();
+
+            yield return wait;
+        }
+
+        _vfxMonitorRoutine = null;
     }
 
     // ══════════════════════════════════════════

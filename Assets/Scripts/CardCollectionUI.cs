@@ -22,7 +22,13 @@ public class CardCollectionUI : MonoBehaviour
 
     private void Awake()
     {
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 
     private void OnEnable()
@@ -145,6 +151,14 @@ public class CardCollectionUI : MonoBehaviour
     private void OnCardSlotClicked(CardDefinition def)
     {
         Debug.Log($"[CardCollectionUI] Card clicked: {def.displayName} (Type: {def.type})");
+
+        // Check for pending Blacklist card-progress reward
+        if (CardProgressRewardHandler.TryConsume(def))
+        {
+            Debug.Log($"[CardCollectionUI] Card-progress reward consumed for '{def.displayName}'. Refreshing slots.");
+            RefreshAll();
+            return;
+        }
 
         // Try to open the detail popup
         if (cardDetailPopup != null)

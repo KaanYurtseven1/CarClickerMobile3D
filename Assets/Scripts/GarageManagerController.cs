@@ -52,8 +52,8 @@ public class GarageManagerController : MonoBehaviour
 
     // Level-based configuration (index = level)
     // [0] = level 0 (locked/unused), [1] = level 1, etc.
-    private static readonly float[] BonusMultipliers = { 0f, 10f, 11f, 12f, 13f, 14f, 15f };
-    private static readonly float[] SpendSecondsEquivalents = { 0f, 30f, 28f, 26f, 24f, 22f, 20f };
+    private static readonly float[] BonusMultipliers = { 0f, 15f, 17f, 19f, 21f, 23f, 25f };
+    private static readonly float[] SpendSecondsEquivalents = { 0f, 25f, 22f, 19f, 16f, 14f, 12f };
 
     // ==================== STATE ====================
 
@@ -312,6 +312,10 @@ public class GarageManagerController : MonoBehaviour
 
         Debug.Log($"[GarageManager] ACTIVATED L{level}: snapshotMps={_snapshotMps:F2}, multiplier={multiplier}, bonusMps={_currentBonusMps:F2}, duration={activeDurationSeconds}s");
 
+        // F3: Garage Manager card activate SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayGarageManagerActivate();
+
         OnActivated?.Invoke(_currentBonusMps, activeDurationSeconds, level);
     }
 
@@ -416,6 +420,82 @@ public class GarageManagerController : MonoBehaviour
 
         float spendSeconds = GetSpendSecondsForLevel(level);
         return currentMps * spendSeconds;
+    }
+
+    // ==================== SAVE / LOAD ====================
+
+    private const string SaveKey_GM_State = "Save_GarageManager_State";
+    private const string SaveKey_GM_Spent = "Save_GarageManager_Spent";
+    private const string SaveKey_GM_EndUTC = "Save_GarageManager_EndUTC";
+    private const string SaveKey_GM_BonusMps = "Save_GarageManager_BonusMps";
+
+    /// <summary>Saves GarageManager state to PlayerPrefs. Called by SaveSystem.</summary>
+    public void SaveState()
+    {
+        PlayerPrefs.SetInt(SaveKey_GM_State, (int)_currentState);
+        PlayerPrefs.SetString(SaveKey_GM_Spent, _spentSinceLastTrigger.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        PlayerPrefs.SetString(SaveKey_GM_BonusMps, _currentBonusMps.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        // Save end time as UTC
+        float endTime = _currentState == GarageManagerState.Active ? _activeEndTime :
+                         _currentState == GarageManagerState.Cooldown ? _cooldownEndTime : 0f;
+        if (endTime > Time.time)
+        {
+            float remaining = endTime - Time.time;
+            long utcEnd = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() + (long)System.Math.Ceiling(remaining);
+            PlayerPrefs.SetString(SaveKey_GM_EndUTC, utcEnd.ToString());
+        }
+        else
+        {
+            PlayerPrefs.SetString(SaveKey_GM_EndUTC, "0");
+        }
+    }
+
+    /// <summary>Loads GarageManager state from PlayerPrefs. Called by SaveSystem.</summary>
+    public void LoadState()
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+
+        string spentStr = PlayerPrefs.GetString(SaveKey_GM_Spent, "0");
+        double.TryParse(spentStr, System.Globalization.NumberStyles.Any, culture, out double spent);
+        _spentSinceLastTrigger = spent;
+
+        string bonusStr = PlayerPrefs.GetString(SaveKey_GM_BonusMps, "0");
+        double.TryParse(bonusStr, System.Globalization.NumberStyles.Any, culture, out double bonus);
+
+        int savedState = PlayerPrefs.GetInt(SaveKey_GM_State, 0);
+        string endStr = PlayerPrefs.GetString(SaveKey_GM_EndUTC, "0");
+        long.TryParse(endStr, out long utcEnd);
+        long nowUtc = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        long remaining = utcEnd > 0 ? utcEnd - nowUtc : 0;
+
+        if (savedState == (int)GarageManagerState.Active && remaining > 0)
+        {
+            _currentState = GarageManagerState.Active;
+            _currentBonusMps = bonus;
+            _activeEndTime = Time.time + remaining;
+        }
+        else if (savedState == (int)GarageManagerState.Active && remaining <= 0)
+        {
+            // Active expired offline — transition to cooldown
+            _currentState = GarageManagerState.Cooldown;
+            _currentBonusMps = 0;
+            _cooldownEndTime = Time.time + cooldownSeconds;
+        }
+        else if (savedState == (int)GarageManagerState.Cooldown && remaining > 0)
+        {
+            _currentState = GarageManagerState.Cooldown;
+            _currentBonusMps = 0;
+            _cooldownEndTime = Time.time + remaining;
+        }
+        else
+        {
+            // Ready or expired cooldown
+            _currentState = GarageManagerState.Ready;
+            _currentBonusMps = 0;
+        }
+
+        Debug.Log($"[GarageManager] LoadState: state={_currentState} spent={_spentSinceLastTrigger:F0} bonusMps={_currentBonusMps:F2} remaining={remaining}s");
     }
 
     // ==================== DEBUG ====================

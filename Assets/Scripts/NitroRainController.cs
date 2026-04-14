@@ -77,7 +77,7 @@ public class NitroRainController : MonoBehaviour
     // [0] = level 0 (locked/unused), [1] = level 1, etc.
     // Required collects INCREASED to be less frequent (original: 3,4,5,6,7,8)
     // Duration scaling: L1=5s, L2=8s, L3=11s, L4=14s, L5=17s, L6=20s (+3s per level)
-    private static readonly int[] RequiredCollects = { 0, 5, 7, 9, 11, 13, 16 };
+    private static readonly int[] RequiredCollects = { 0, 4, 7, 9, 11, 13, 16 };
     private static readonly float[] RainDurations = { 0f, 5f, 8f, 11f, 14f, 17f, 20f };
 
     // ==================== STATE ====================
@@ -491,6 +491,9 @@ public class NitroRainController : MonoBehaviour
         Debug.Log($"[NitroRain] Threshold reached (collected {_collectedCount}/{required}). Starting {delaySeconds}s delay.");
 #endif
 
+        // N5: Nitro rain delay start SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayNitroRainDelay();
+
         OnDelayStarted?.Invoke(delaySeconds);
     }
 
@@ -524,6 +527,13 @@ public class NitroRainController : MonoBehaviour
         Debug.Log($"[NitroRain] RAIN STARTED for {duration}s (Level {level}).");
 #endif
 
+        // N6: Rain start SFX + N7: Start rain ambient loop
+        if (SFXManager.Instance != null)
+        {
+            SFXManager.Instance.PlayNitroRainStart();
+            SFXManager.Instance.StartRainLoop();
+        }
+
         OnRainStarted?.Invoke(duration, level);
     }
 
@@ -538,6 +548,13 @@ public class NitroRainController : MonoBehaviour
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log("[NitroRain] RAIN ENDED. Resetting progress.");
 #endif
+
+        // N8: Rain end SFX + stop rain loop
+        if (SFXManager.Instance != null)
+        {
+            SFXManager.Instance.PlayNitroRainEnd();
+            SFXManager.Instance.StopRainLoop();
+        }
 
         OnRainEnded?.Invoke();
     }
@@ -567,8 +584,8 @@ public class NitroRainController : MonoBehaviour
         Vector3 startPos = new Vector3(x, y, z);
         Vector3 targetPos = new Vector3(x, spawner.spawnTop.position.y, z);
 
-        // Instantiate at start position with scale 0
-        GameObject obj = Instantiate(spawner.nitroCoinPrefab, startPos, Quaternion.identity);
+        // Instantiate at start position with scale 0, Y rotation 180° for rain coins
+        GameObject obj = Instantiate(spawner.nitroCoinPrefab, startPos, Quaternion.Euler(0f, 180f, 0f));
         obj.transform.localScale = Vector3.zero;
 
         // Set despawn Z from spawner
@@ -576,6 +593,12 @@ public class NitroRainController : MonoBehaviour
         if (coin != null && spawner.spawnBottom != null)
         {
             coin.despawnZ = spawner.spawnBottom.position.z;
+        }
+
+        // Notify NitroMagnetController of newly spawned rain coin
+        if (coin != null && NitroMagnetController.Instance != null)
+        {
+            NitroMagnetController.Instance.OnCoinSpawned(coin);
         }
 
         // Store the prefab's original scale to use as baseline
@@ -767,6 +790,67 @@ public class NitroRainController : MonoBehaviour
             Debug.Log($"[NitroRain] Boost ended — starting queued rain at level {level}.");
             StartRain(level);
         }
+    }
+
+    // ==================== SAVE / LOAD ====================
+
+    private const string SaveKey_NR_State = "Save_NitroRain_State";
+    private const string SaveKey_NR_Collected = "Save_NitroRain_Collected";
+    private const string SaveKey_NR_EndUTC = "Save_NitroRain_EndUTC";
+    private const string SaveKey_NR_QueuedLevel = "Save_NitroRain_QueuedLevel";
+
+    /// <summary>Saves NitroRain progress to PlayerPrefs. Called by SaveSystem.</summary>
+    public void SaveState()
+    {
+        PlayerPrefs.SetInt(SaveKey_NR_State, (int)_currentState);
+        PlayerPrefs.SetInt(SaveKey_NR_Collected, _collectedCount);
+        PlayerPrefs.SetInt(SaveKey_NR_QueuedLevel, _rainQueuedLevel);
+
+        // Save remaining time as UTC end
+        if ((_currentState == NitroRainState.PendingDelay || _currentState == NitroRainState.Raining) && _stateEndTime > Time.time)
+        {
+            float remaining = _stateEndTime - Time.time;
+            long utcEnd = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() + (long)System.Math.Ceiling(remaining);
+            PlayerPrefs.SetString(SaveKey_NR_EndUTC, utcEnd.ToString());
+        }
+        else
+        {
+            PlayerPrefs.SetString(SaveKey_NR_EndUTC, "0");
+        }
+    }
+
+    /// <summary>Loads NitroRain progress from PlayerPrefs. Called by SaveSystem.</summary>
+    public void LoadState()
+    {
+        _rainQueuedLevel = PlayerPrefs.GetInt(SaveKey_NR_QueuedLevel, 0);
+        _collectedCount = PlayerPrefs.GetInt(SaveKey_NR_Collected, 0);
+
+        int savedState = PlayerPrefs.GetInt(SaveKey_NR_State, 0);
+        string endStr = PlayerPrefs.GetString(SaveKey_NR_EndUTC, "0");
+        long.TryParse(endStr, out long utcEnd);
+        long nowUtc = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        long remaining = utcEnd > 0 ? utcEnd - nowUtc : 0;
+
+        if (savedState == (int)NitroRainState.PendingDelay && remaining > 0)
+        {
+            _currentState = NitroRainState.PendingDelay;
+            _stateEndTime = Time.time + remaining;
+        }
+        else if (savedState == (int)NitroRainState.Raining && remaining > 0)
+        {
+            // Rain was active — restore it
+            _currentState = NitroRainState.Raining;
+            _stateEndTime = Time.time + remaining;
+            _nextSpawnTime = Time.time;
+        }
+        else
+        {
+            // Expired or Ready — reset to Ready with collected count preserved
+            _currentState = NitroRainState.Ready;
+            _stateEndTime = 0f;
+        }
+
+        Debug.Log($"[NitroRain] LoadState: state={_currentState} collected={_collectedCount} remaining={remaining}s queued={_rainQueuedLevel}");
     }
 
     // ==================== DEBUG ====================

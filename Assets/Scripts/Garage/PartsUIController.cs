@@ -78,6 +78,34 @@ public class PartsUIController : MonoBehaviour
         onPartToggled?.Invoke(_partKeys[index]);
     }
 
+    // ══════════════════ Affordability API ══════════════════
+
+    /// <summary>Sets the affordability visual (dim/bright) for a specific part frame.</summary>
+    public void SetPartAffordable(int index, bool canAfford, bool owned)
+    {
+        if (index < 0 || index >= PART_COUNT || _frameImages[index] == null) return;
+        Color c = _frameImages[index].color;
+        c.a = canAfford ? 1f : 0.35f;
+        _frameImages[index].color = c;
+    }
+
+    /// <summary>Shake feedback when player can't afford this part.</summary>
+    public void ShakePart(string partKey)
+    {
+        if (_partKeys == null) return;
+        for (int i = 0; i < _partKeys.Length; i++)
+        {
+            if (_partKeys[i] == partKey && i < PART_COUNT)
+            {
+                RectTransform rect = _frameImages[i] != null
+                    ? _frameImages[i].GetComponent<RectTransform>()
+                    : null;
+                GarageAffordabilityHelper.ShakeButton(rect);
+                break;
+            }
+        }
+    }
+
     // ══════════════════ Public API ══════════════════
 
     /// <summary>

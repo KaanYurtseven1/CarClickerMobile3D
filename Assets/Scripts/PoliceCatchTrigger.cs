@@ -2,34 +2,42 @@ using UnityEngine;
 using System.Collections;
 
 /// <summary>
-/// Single-authority manager that links the Radar "photo taken" event to
-/// the PoliceCatch minigame via the Popularity stage system.
+/// Reason why a police chase was requested.
+/// Used for debug tracing and future branching logic.
+/// </summary>
+public enum PoliceCatchReason
+{
+    /// <summary>Player missed enough radars given their current Popularity Stage.</summary>
+    RadarMissThreshold,
+
+    /// <summary>AmbientHeatManager's hidden pressure crossed its configured threshold.</summary>
+    AmbientHeatThreshold
+}
+
+/// <summary>
+/// Single-authority manager that handles ALL police chase request routing.
 ///
-/// DEFERRED START LOGIC:
-///   • Each time a radar takes a photo (player missed it), radarCatchCounter increments.
-///   • The current PopularityStage determines the threshold (catches needed).
-///   • When radarCatchCounter >= threshold → pendingPoliceCatch is set to true.
-///     The counter resets to 0 at this point.
-///   • Police Chase does NOT start immediately. It waits until the radar popup
-///     closes (RadarPopupController.OnRadarPopupClosed event).
-///   • When the popup closes AND pendingPoliceCatch is true → PoliceCatchController.StartChase()
-///     is called and the pending flag is cleared.
-///   • If pendingPoliceCatch is already true, additional threshold reaches are ignored
-///     (the counter was already reset; the pending flag is already set).
+/// DUAL TRIGGER PATHS:
+///   1. RadarMissThreshold — player misses enough radars for their Popularity Stage.
+///   2. AmbientHeatThreshold — hidden AmbientHeatManager pressure crosses its threshold.
+///
+/// Both paths funnel into the unified RequestPoliceCatch() method, which owns:
+///   - duplicate/race-condition guards
+///   - cooldown enforcement
+///   - popup-safe deferred start
+///   - the single call to PoliceCatchController.StartChase()
+///
+/// DEFERRED START:
+///   Chase does NOT start immediately on request. It waits for the current radar
+///   popup to close (if open), then applies a brief postPopupDelay.
+///   If no popup is open, DeferredStartChase runs immediately.
 ///
 /// PERSISTENCE:
-///   • radarCatchCounter is saved via PlayerPrefs key "Save_RadarCatchCounter".
-///   • pendingPoliceCatch is saved via PlayerPrefs key "Save_PendingPoliceCatch" (0/1).
-///   • On load, if pendingPoliceCatch is true and no radar popup is currently open,
-///     Police Chase is deferred to the NEXT radar popup close (safest approach —
-///     avoids surprise instant-start during loading). If a radar popup happens to be
-///     open at load time the normal flow handles it.
-///   • SaveSystem calls SaveState() / LoadState() during its save/load cycle.
+///   radarCatchCounter and pendingPoliceCatch are saved to PlayerPrefs.
+///   SaveSystem calls SaveState() / LoadState().
 ///
 /// Usage:
-///   Place this component on a persistent GameObject (e.g. GameManager or its own object).
-///   It auto-subscribes to PopularityManager.OnRadarPhotoTaken and
-///   RadarPopupController.OnRadarPopupClosed.
+///   Place this on a persistent GameObject (e.g. GameManager).
 /// </summary>
 public class PoliceCatchTrigger : MonoBehaviour
 {
@@ -58,29 +66,41 @@ public class PoliceCatchTrigger : MonoBehaviour
     [SerializeField] private int thresholdStage6 = 3;
 
     [Header("Deferred Start")]
-    [Tooltip("Extra delay (seconds) after radar popup closes before starting Police Chase. " +
-             "Gives a brief breathing room so the transition feels clean.")]
+    [Tooltip("Extra delay (seconds) after radar popup closes before starting Police Chase.")]
     [SerializeField] private float postPopupDelay = 0.3f;
 
+    [Header("Cooldown")]
+    [Tooltip("Minimum time (seconds) between any two police chases. " +
+             "Prevents back-to-back chases from both trigger paths. 0 = no limit.")]
+    [SerializeField] private float minimumTimeBetweenChases = 15f;
+
     [Header("Debug")]
-    [Tooltip("Enable verbose debug logs for popularity / catch / pending tracking.")]
+    [Tooltip("Enable verbose debug logs for all trigger paths, pending state, and cooldown.")]
     [SerializeField] private bool enableDebugLogs = false;
 
     // ==================== RUNTIME STATE ====================
 
-    /// <summary>
-    /// Number of radar photos taken since the last police chase (or game start).
-    /// Persisted across sessions via SaveSystem.
-    /// </summary>
+    /// <summary>Number of radar misses since the last miss-threshold chase request.</summary>
     public int RadarCatchCounter => _radarCatchCounter;
     private int _radarCatchCounter = 0;
 
-    /// <summary>
-    /// True when the threshold has been reached but Police Chase has not yet started
-    /// (waiting for radar popup to close). Persisted across sessions.
-    /// </summary>
+    /// <summary>True when a chase has been requested and is waiting to start.</summary>
     public bool PendingPoliceCatch => _pendingPoliceCatch;
     private bool _pendingPoliceCatch = false;
+
+    /// <summary>
+    /// True when a chase has been requested and is waiting to start.
+    /// Used externally (e.g. AmbientHeatManager) to avoid duplicate requests.
+    /// </summary>
+    public bool HasPendingRequest => _pendingPoliceCatch;
+
+    /// <summary>The reason the current (or last) chase was requested.</summary>
+    public PoliceCatchReason LastTriggerReason => _lastTriggerReason;
+    private PoliceCatchReason _lastTriggerReason = PoliceCatchReason.RadarMissThreshold;
+
+    /// <summary>Time.time when the last chase fully ended. Used for cooldown.</summary>
+    public float TimeSinceLastChase => Time.time - _lastChaseEndTime;
+    private float _lastChaseEndTime = -9999f;
 
     // Coroutine handle for the deferred start delay
     private Coroutine _deferredStartCoroutine;
@@ -89,6 +109,7 @@ public class PoliceCatchTrigger : MonoBehaviour
 
     private const string KEY_RADAR_CATCH_COUNTER = "Save_RadarCatchCounter";
     private const string KEY_PENDING_POLICE_CATCH = "Save_PendingPoliceCatch";
+    private const string KEY_LAST_CHASE_END_UTC = "Save_PoliceCooldownEndUTC";
 
     // ==================== LIFECYCLE ====================
 
@@ -109,12 +130,14 @@ public class PoliceCatchTrigger : MonoBehaviour
     {
         PopularityManager.OnRadarPhotoTaken += HandleRadarPhotoTaken;
         RadarPopupController.OnRadarPopupClosed += HandleRadarPopupClosed;
+        PoliceCatchController.OnChaseEnded += HandleChaseEnded;
     }
 
     private void OnDisable()
     {
         PopularityManager.OnRadarPhotoTaken -= HandleRadarPhotoTaken;
         RadarPopupController.OnRadarPopupClosed -= HandleRadarPopupClosed;
+        PoliceCatchController.OnChaseEnded -= HandleChaseEnded;
     }
 
     private void OnDestroy()
@@ -123,25 +146,87 @@ public class PoliceCatchTrigger : MonoBehaviour
             Instance = null;
     }
 
-    // ==================== CORE LOGIC ====================
+    // ==================== UNIFIED REQUEST PIPELINE ====================
 
     /// <summary>
-    /// Called when a radar takes a photo (player missed it).
-    /// Increments counter, checks threshold, sets pending flag if reached.
-    /// Does NOT start Police Chase — that waits for popup close.
+    /// THE single entry point for all police chase requests.
+    ///
+    /// Safe to call from any trigger source (radar miss threshold, ambient heat, etc.).
+    /// Handles all guards internally:
+    ///   • ignores if a chase is already active
+    ///   • ignores if a chase is already pending
+    ///   • ignores if the cooldown has not expired
+    ///
+    /// If the radar popup is currently open, the chase defers until it closes.
+    /// If no popup is open, the deferred coroutine starts immediately.
+    /// </summary>
+    /// <param name="reason">The source that triggered this request (for debugging).</param>
+    public void RequestPoliceCatch(PoliceCatchReason reason)
+    {
+        // Guard: a chase is already running
+        if (PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive)
+        {
+            if (enableDebugLogs)
+                Debug.Log($"[PoliceCatchTrigger] RequestPoliceCatch({reason}) IGNORED — chase already active.");
+            return;
+        }
+
+        // Guard: a chase is already pending
+        if (_pendingPoliceCatch)
+        {
+            if (enableDebugLogs)
+                Debug.Log($"[PoliceCatchTrigger] RequestPoliceCatch({reason}) IGNORED — chase already pending (reason={_lastTriggerReason}).");
+            return;
+        }
+
+        // Guard: minimum time between chases (cooldown)
+        if (minimumTimeBetweenChases > 0f && Time.time - _lastChaseEndTime < minimumTimeBetweenChases)
+        {
+            float remaining = minimumTimeBetweenChases - (Time.time - _lastChaseEndTime);
+            if (enableDebugLogs)
+                Debug.Log($"[PoliceCatchTrigger] RequestPoliceCatch({reason}) IGNORED — cooldown active ({remaining:F1}s remaining).");
+            return;
+        }
+
+        // All guards passed — register the pending request
+        _pendingPoliceCatch = true;
+        _lastTriggerReason = reason;
+
+        if (enableDebugLogs)
+            Debug.Log($"[PoliceCatchTrigger] RequestPoliceCatch({reason}) ACCEPTED — pending=true.");
+
+        // If the radar popup is currently open, wait for it to close.
+        // HandleRadarPopupClosed will start DeferredStartChase when closed.
+        if (RadarPopupController.Instance != null && RadarPopupController.Instance.IsPopupOpen)
+        {
+            if (enableDebugLogs)
+                Debug.Log("[PoliceCatchTrigger] Popup is open — deferring until popup closes.");
+            return;
+        }
+
+        // No popup currently open — start the deferred coroutine immediately
+        if (_deferredStartCoroutine != null)
+            StopCoroutine(_deferredStartCoroutine);
+        _deferredStartCoroutine = StartCoroutine(DeferredStartChase());
+    }
+
+    // ==================== PRIVATE EVENT HANDLERS ====================
+
+    /// <summary>
+    /// Called each time a radar takes a photo (player missed it).
+    /// Counts misses against the stage-based threshold.
+    /// Calls RequestPoliceCatch when threshold is crossed.
     /// </summary>
     private void HandleRadarPhotoTaken()
     {
-        // If a chase is already pending or active, just increment the counter but don't re-trigger
-        if (_pendingPoliceCatch)
+        // If a chase is already pending or active, accumulate toward the NEXT chase only
+        if (_pendingPoliceCatch ||
+            (PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive))
         {
-            // Counter was already reset when pending was set; new catches accumulate toward NEXT chase
             _radarCatchCounter++;
             if (enableDebugLogs)
-            {
-                Debug.Log($"[PoliceCatchTrigger] Radar photo while pending=true. " +
-                          $"Counter now {_radarCatchCounter} (will count toward next chase).");
-            }
+                Debug.Log($"[PoliceCatchTrigger] Radar photo while chase pending/active. " +
+                          $"Counter now {_radarCatchCounter} (toward NEXT chase).");
             return;
         }
 
@@ -159,50 +244,54 @@ public class PoliceCatchTrigger : MonoBehaviour
         int threshold = GetThresholdForStage(stage);
 
         if (enableDebugLogs)
-        {
-            Debug.Log($"[PoliceCatchTrigger] Radar photo! " +
+            Debug.Log($"[PoliceCatchTrigger] Radar miss — " +
                       $"popularity={Mathf.RoundToInt(popularity01 * 100f)} " +
                       $"stage={stage} " +
-                      $"radarCatchCounter={_radarCatchCounter}/{threshold} " +
-                      $"pending={_pendingPoliceCatch}");
-        }
+                      $"counter={_radarCatchCounter}/{threshold}");
 
-        // Check if threshold met
         if (_radarCatchCounter >= threshold)
         {
             if (enableDebugLogs)
-            {
-                Debug.Log($"[PoliceCatchTrigger] THRESHOLD REACHED — setting pendingPoliceCatch=true. " +
-                          $"(catches={_radarCatchCounter}, threshold={threshold}, stage={stage}). " +
-                          $"Police Chase will start after radar popup closes.");
-            }
+                Debug.Log($"[PoliceCatchTrigger] RadarMissThreshold reached " +
+                          $"({_radarCatchCounter}/{threshold}, stage={stage}).");
 
-            // Reset counter NOW (catches toward NEXT chase start fresh)
+            // Reset counter before requesting — next misses count toward the chase after this one
             _radarCatchCounter = 0;
-            _pendingPoliceCatch = true;
+
+            RequestPoliceCatch(PoliceCatchReason.RadarMissThreshold);
         }
     }
 
     /// <summary>
     /// Called when the radar popup finishes closing.
-    /// If a Police Chase is pending, this is the moment we start it.
+    /// If a chase was requested while the popup was open, start it now.
     /// </summary>
     private void HandleRadarPopupClosed()
     {
-        if (!_pendingPoliceCatch)
-            return;
+        if (!_pendingPoliceCatch) return;
 
         if (enableDebugLogs)
-        {
-            Debug.Log("[PoliceCatchTrigger] Radar popup closed with pending Police Chase. " +
-                      $"Starting chase after {postPopupDelay:F2}s delay...");
-        }
+            Debug.Log($"[PoliceCatchTrigger] Popup closed with pending chase (reason={_lastTriggerReason}). " +
+                      $"Starting after {postPopupDelay:F2}s delay.");
 
-        // Use a small delay so the transition feels smooth
         if (_deferredStartCoroutine != null)
             StopCoroutine(_deferredStartCoroutine);
         _deferredStartCoroutine = StartCoroutine(DeferredStartChase());
     }
+
+    /// <summary>
+    /// Called when a police chase fully ends (via PoliceCatchController.OnChaseEnded).
+    /// Records the end time for cooldown tracking.
+    /// </summary>
+    private void HandleChaseEnded()
+    {
+        _lastChaseEndTime = Time.time;
+
+        if (enableDebugLogs)
+            Debug.Log($"[PoliceCatchTrigger] Chase ended. Cooldown reset (minimumTimeBetweenChases={minimumTimeBetweenChases}s).");
+    }
+
+    // ==================== DEFERRED START COROUTINE ====================
 
     private IEnumerator DeferredStartChase()
     {
@@ -214,20 +303,18 @@ public class PoliceCatchTrigger : MonoBehaviour
         // Clear pending flag
         _pendingPoliceCatch = false;
 
-        // Guard: don't start if a chase is already running
         if (PoliceCatchController.Instance != null)
         {
             if (!PoliceCatchController.Instance.IsChaseActive)
             {
                 if (enableDebugLogs)
-                    Debug.Log("[PoliceCatchTrigger] DEFERRED Police Chase starting NOW.");
-
+                    Debug.Log($"[PoliceCatchTrigger] Starting chase now (reason={_lastTriggerReason}).");
                 PoliceCatchController.Instance.StartChase();
             }
             else
             {
                 if (enableDebugLogs)
-                    Debug.Log("[PoliceCatchTrigger] Chase already active at deferred start — skipping.");
+                    Debug.Log("[PoliceCatchTrigger] Chase already active at deferred start time — skipping.");
             }
         }
         else
@@ -236,42 +323,37 @@ public class PoliceCatchTrigger : MonoBehaviour
         }
     }
 
+    // ==================== PUBLIC API ====================
+
     /// <summary>
     /// Called by external systems (e.g. SaveSystem.OnGameLoaded) to try firing
-    /// a pending Police Chase that was persisted from a previous session.
+    /// a pending Police Chase that was loaded from a previous session.
     ///
-    /// RULE: If pending is true on load but no radar popup is currently open,
-    /// we wait until the NEXT radar popup closes. This avoids a surprise
-    /// instant-start during or right after loading.
-    /// If a radar popup IS currently open, the normal OnRadarPopupClosed flow handles it.
+    /// Per our deterministic safe rule: if no popup is currently open, the chase
+    /// defers until the NEXT radar popup closes. This avoids a surprise instant-start
+    /// during or immediately after loading.
     /// </summary>
     public void TryFirePendingPoliceCatch()
     {
-        if (!_pendingPoliceCatch)
-            return;
+        if (!_pendingPoliceCatch) return;
 
-        // If radar popup is currently open, do nothing — the normal event flow
-        // (OnRadarPopupClosed) will fire the chase when it closes.
+        // If popup is currently open the normal OnRadarPopupClosed flow handles it
         if (RadarPopupController.Instance != null && RadarPopupController.Instance.IsPopupOpen)
         {
             if (enableDebugLogs)
-                Debug.Log("[PoliceCatchTrigger] TryFirePending: radar popup currently open — " +
-                          "will start chase when it closes (normal flow).");
+                Debug.Log("[PoliceCatchTrigger] TryFirePending: popup open — waiting for popup close.");
             return;
         }
 
-        // No popup open. Per our deterministic rule: wait until NEXT radar popup closes.
-        // The pending flag stays true and OnRadarPopupClosed will handle it.
+        // No popup open — keep pending flag; wait for NEXT radar popup close
         if (enableDebugLogs)
             Debug.Log("[PoliceCatchTrigger] TryFirePending: no popup open — " +
-                      "pending flag remains true; chase will start after next radar popup closes.");
+                      "pending remains true; chase will start after next popup closes.");
     }
 
     // ==================== THRESHOLD LOOKUP ====================
 
-    /// <summary>
-    /// Returns the configured threshold for the given stage.
-    /// </summary>
+    /// <summary>Returns the configured miss threshold for the given popularity stage.</summary>
     public int GetThresholdForStage(PopularityStage stage)
     {
         switch (stage)
@@ -297,11 +379,28 @@ public class PoliceCatchTrigger : MonoBehaviour
         PlayerPrefs.SetInt(KEY_RADAR_CATCH_COUNTER, _radarCatchCounter);
         PlayerPrefs.SetInt(KEY_PENDING_POLICE_CATCH, _pendingPoliceCatch ? 1 : 0);
 
-        if (enableDebugLogs)
+        // Persist cooldown end as UTC so offline time counts
+        if (_lastChaseEndTime > 0f)
         {
-            Debug.Log($"[PoliceCatchTrigger] SaveState: counter={_radarCatchCounter} " +
-                      $"pending={_pendingPoliceCatch}");
+            float elapsed = Time.time - _lastChaseEndTime;
+            float cooldownLeft = minimumTimeBetweenChases - elapsed;
+            if (cooldownLeft > 0f)
+            {
+                long utcEnd = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() + (long)System.Math.Ceiling(cooldownLeft);
+                PlayerPrefs.SetString(KEY_LAST_CHASE_END_UTC, utcEnd.ToString());
+            }
+            else
+            {
+                PlayerPrefs.SetString(KEY_LAST_CHASE_END_UTC, "0");
+            }
         }
+        else
+        {
+            PlayerPrefs.SetString(KEY_LAST_CHASE_END_UTC, "0");
+        }
+
+        if (enableDebugLogs)
+            Debug.Log($"[PoliceCatchTrigger] SaveState: counter={_radarCatchCounter} pending={_pendingPoliceCatch}");
     }
 
     /// <summary>
@@ -315,22 +414,34 @@ public class PoliceCatchTrigger : MonoBehaviour
         _radarCatchCounter = PlayerPrefs.GetInt(KEY_RADAR_CATCH_COUNTER, 0);
         _pendingPoliceCatch = PlayerPrefs.GetInt(KEY_PENDING_POLICE_CATCH, 0) == 1;
 
-        if (enableDebugLogs)
+        // Restore cooldown from UTC timestamp
+        string utcStr = PlayerPrefs.GetString(KEY_LAST_CHASE_END_UTC, "0");
+        if (long.TryParse(utcStr, out long utcEnd) && utcEnd > 0)
         {
-            Debug.Log($"[PoliceCatchTrigger] LoadState: counter={_radarCatchCounter} " +
-                      $"pending={_pendingPoliceCatch}");
+            long nowUtc = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            long remaining = utcEnd - nowUtc;
+            if (remaining > 0)
+            {
+                // Cooldown still active: set _lastChaseEndTime so Time.time - _lastChaseEndTime < minimumTimeBetweenChases
+                _lastChaseEndTime = Time.time - (minimumTimeBetweenChases - remaining);
+            }
+            else
+            {
+                _lastChaseEndTime = -9999f; // Cooldown expired offline
+            }
         }
+
+        if (enableDebugLogs)
+            Debug.Log($"[PoliceCatchTrigger] LoadState: counter={_radarCatchCounter} pending={_pendingPoliceCatch}");
     }
 
-    /// <summary>
-    /// Manually reset the radar catch counter and pending flag.
-    /// </summary>
+    /// <summary>Manually resets the radar catch counter and clears any pending flag.</summary>
     public void ResetCounter()
     {
         _radarCatchCounter = 0;
         _pendingPoliceCatch = false;
         if (enableDebugLogs)
-            Debug.Log("[PoliceCatchTrigger] Counter and pending flag reset to 0/false.");
+            Debug.Log("[PoliceCatchTrigger] Counter and pending flag reset.");
     }
 
     // ==================== EDITOR TEST ====================
@@ -339,23 +450,29 @@ public class PoliceCatchTrigger : MonoBehaviour
     [ContextMenu("TEST: Simulate Radar Photo")]
     private void DebugSimulatePhoto()
     {
-        if (!Application.isPlaying)
-        {
-            Debug.LogWarning("[PoliceCatchTrigger] Must be in Play Mode.");
-            return;
-        }
+        if (!Application.isPlaying) { Debug.LogWarning("[PoliceCatchTrigger] Must be in Play Mode."); return; }
         HandleRadarPhotoTaken();
     }
 
     [ContextMenu("TEST: Simulate Popup Close")]
     private void DebugSimulatePopupClose()
     {
-        if (!Application.isPlaying)
-        {
-            Debug.LogWarning("[PoliceCatchTrigger] Must be in Play Mode.");
-            return;
-        }
+        if (!Application.isPlaying) { Debug.LogWarning("[PoliceCatchTrigger] Must be in Play Mode."); return; }
         HandleRadarPopupClosed();
+    }
+
+    [ContextMenu("TEST: Request Chase (RadarMissThreshold)")]
+    private void DebugRequestMissChase()
+    {
+        if (!Application.isPlaying) { Debug.LogWarning("[PoliceCatchTrigger] Must be in Play Mode."); return; }
+        RequestPoliceCatch(PoliceCatchReason.RadarMissThreshold);
+    }
+
+    [ContextMenu("TEST: Request Chase (AmbientHeatThreshold)")]
+    private void DebugRequestHeatChase()
+    {
+        if (!Application.isPlaying) { Debug.LogWarning("[PoliceCatchTrigger] Must be in Play Mode."); return; }
+        RequestPoliceCatch(PoliceCatchReason.AmbientHeatThreshold);
     }
 
     [ContextMenu("TEST: Log State")]
@@ -366,12 +483,17 @@ public class PoliceCatchTrigger : MonoBehaviour
         if (PopularityManager.Instance != null)
         {
             stage = PopularityManager.Instance.GetCurrentStage();
-            pop = PopularityManager.Instance.Popularity01;
+            pop   = PopularityManager.Instance.Popularity01;
         }
         int threshold = GetThresholdForStage(stage);
-        Debug.Log($"[PoliceCatchTrigger] State: popularity={Mathf.RoundToInt(pop * 100f)} " +
-                  $"stage={stage} catches={_radarCatchCounter}/{threshold} " +
-                  $"pending={_pendingPoliceCatch}");
+        Debug.Log($"[PoliceCatchTrigger] State:\n" +
+                  $"  popularity     = {Mathf.RoundToInt(pop * 100f)}\n" +
+                  $"  stage          = {stage}\n" +
+                  $"  missCounter    = {_radarCatchCounter}/{threshold}\n" +
+                  $"  pending        = {_pendingPoliceCatch}\n" +
+                  $"  lastReason     = {_lastTriggerReason}\n" +
+                  $"  timeSinceChase = {TimeSinceLastChase:F1}s\n" +
+                  $"  cooldown       = {minimumTimeBetweenChases}s");
     }
 #endif
 }

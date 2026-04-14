@@ -87,10 +87,21 @@ public class SaveSystem : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
+
+            // DontDestroyOnLoad only works on ROOT GameObjects.
+            // If SaveSystem is a child (e.g. under "Managers"), detach first.
+            if (transform.parent != null)
+            {
+                Debug.Log($"[SaveSystem] Detaching from parent '{transform.parent.name}' for DontDestroyOnLoad.");
+                transform.SetParent(null);
+            }
+
             DontDestroyOnLoad(gameObject);
+            Debug.Log($"[SaveSystem] Instance assigned to {name}#{GetInstanceID()}, DontDestroyOnLoad applied.");
         }
         else
         {
+            Debug.Log($"[SaveSystem] Duplicate detected ({name}#{GetInstanceID()}), destroying. Keeping {Instance.name}#{Instance.GetInstanceID()}");
             Destroy(gameObject);
             return;
         }
@@ -172,14 +183,28 @@ public class SaveSystem : MonoBehaviour
 
         PlayerPrefs.SetString("Save_TotalMoney", cm.totalMoneyEarned.ToString(culture));
         PlayerPrefs.SetInt("Save_NitroCoins", cm.nitroCoins);
+        PlayerPrefs.SetInt("Save_PremiumCurrency", cm.premiumCurrency);
 
-        Debug.Log($"[SaveSystem] SAVE Money key=Save_Money value={moneyStr} (raw double={cm.money}) MPS={cm.moneyPerSecond} MPT={cm.moneyPerTap}");
+        Debug.Log($"[SaveSystem] SAVE Money key=Save_Money value={moneyStr} (raw double={cm.money}) MPS={cm.moneyPerSecond} MPT={cm.moneyPerTap} premium={cm.premiumCurrency}");
 
-        UpgradeButton[] upgrades = FindObjectsByType<UpgradeButton>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (var up in upgrades)
+        // Save upgrade levels from DDOL registry (survives scene transitions).
+        // Falls back to scene search only if registry is empty (first launch guard).
+        if (UpgradeSaveRegistry.Instance != null && UpgradeSaveRegistry.Instance.HasEntries)
         {
-            string key = "Save_Upgrade_" + up.upgradeType.ToString() + "_Level";
-            PlayerPrefs.SetInt(key, up.GetCurrentLevel());
+            foreach (var kvp in UpgradeSaveRegistry.Instance.GetAll())
+            {
+                string key = "Save_Upgrade_" + kvp.Key + "_Level";
+                PlayerPrefs.SetInt(key, kvp.Value);
+            }
+        }
+        else
+        {
+            UpgradeButton[] upgrades = FindObjectsByType<UpgradeButton>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var up in upgrades)
+            {
+                string key = "Save_Upgrade_" + up.upgradeType.ToString() + "_Level";
+                PlayerPrefs.SetInt(key, up.GetCurrentLevel());
+            }
         }
 
         if (BuildingManager.Instance != null)
@@ -192,6 +217,9 @@ public class SaveSystem : MonoBehaviour
             }
         }
 
+        // [DEBUG] Restore real card data before saving to prevent debug values from persisting.
+        DebugCardLoadout.OnBeforeSaveCards();
+
         if (CardManager.Instance != null && CardManager.Instance.cards != null)
         {
             foreach (var card in CardManager.Instance.cards)
@@ -199,8 +227,17 @@ public class SaveSystem : MonoBehaviour
                 string prefix = "Save_Card_" + card.type.ToString() + "_";
                 PlayerPrefs.SetInt(prefix + "Level", card.currentLevel);
                 PlayerPrefs.SetInt(prefix + "Copies", card.copiesOwned);
+                if (card.copiesOwned > 0 || card.currentLevel > 0)
+                    Debug.Log($"[SaveSystem] SAVE card {card.type}: L{card.currentLevel} copies={card.copiesOwned}");
             }
         }
+        else
+        {
+            Debug.LogWarning("[SaveSystem] SaveGame: CardManager.Instance or cards is NULL — card data NOT saved!");
+        }
+
+        // [DEBUG] Re-inject debug card overrides after save is complete.
+        DebugCardLoadout.OnAfterSaveCards();
 
         // NitroMagnet state
         if (NitroMagnetController.Instance != null)
@@ -214,11 +251,41 @@ public class SaveSystem : MonoBehaviour
             PlayerPrefs.SetFloat("Save_Popularity01", PopularityManager.Instance.Popularity01);
         }
 
-        // PoliceCatchTrigger: radar catch counter + pending flag
+        // PoliceCatchTrigger: radar catch counter + pending flag + cooldown
         if (PoliceCatchTrigger.Instance != null)
         {
             PoliceCatchTrigger.Instance.SaveState();
         }
+
+        // NitroRain progress
+        if (NitroRainController.Instance != null)
+        {
+            NitroRainController.Instance.SaveState();
+        }
+
+        // GarageManager bonus state
+        if (GarageManagerController.Instance != null)
+        {
+            GarageManagerController.Instance.SaveState();
+        }
+
+        // AmbientHeat
+        if (AmbientHeatManager.Instance != null)
+        {
+            AmbientHeatManager.Instance.SaveState();
+        }
+
+        // Garage customisation state
+        if (GarageSaveData.Instance != null)
+        {
+            GarageSaveData.Instance.SaveToPrefs();
+        }
+
+        // Blacklist campaign
+        if (BlacklistStatTracker.Instance != null)
+            BlacklistStatTracker.Instance.SaveCounters();
+        if (BlacklistManager.Instance != null)
+            BlacklistManager.Instance.Save();
 
         PlayerPrefs.SetInt("HasSave", 1);
         PlayerPrefs.Save();
@@ -230,10 +297,24 @@ public class SaveSystem : MonoBehaviour
 
     public void LoadGame()
     {
+        // 0) Garage state (always load, even without HasSave)
+        if (GarageSaveData.Instance != null)
+        {
+            GarageSaveData.Instance.LoadFromPrefs();
+        }
+
         // 1) Chest inventory her durumda load edilsin (key yoksa zaten boş)
         if (ChestInventoryManager.Instance != null)
         {
             ChestInventoryManager.Instance.LoadFromPrefs();
+        }
+
+        // 1b) Session recovery: detect interrupted chest-opening sessions
+        //     Must run AFTER chest inventory is loaded (needs OpeningInProgress state)
+        //     and BEFORE UI refresh (recovery may revert chest state).
+        if (ChestSessionManager.Instance != null)
+        {
+            ChestSessionManager.Instance.RecoverIfNeeded();
         }
 
         // UI’yi chest durumuna göre güncelle (0 ise gizlenir)
@@ -271,8 +352,9 @@ public class SaveSystem : MonoBehaviour
 
         cm.totalMoneyEarned = GetDouble("Save_TotalMoney", cm.totalMoneyEarned);
         cm.nitroCoins = PlayerPrefs.GetInt("Save_NitroCoins", cm.nitroCoins);
+        cm.premiumCurrency = PlayerPrefs.GetInt("Save_PremiumCurrency", cm.premiumCurrency);
 
-        Debug.Log($"[SaveSystem] LOAD parsed: money={cm.money} MPS={cm.moneyPerSecond} MPT={cm.moneyPerTap} total={cm.totalMoneyEarned} nitro={cm.nitroCoins}");
+        Debug.Log($"[SaveSystem] LOAD parsed: money={cm.money} MPS={cm.moneyPerSecond} MPT={cm.moneyPerTap} total={cm.totalMoneyEarned} nitro={cm.nitroCoins} premium={cm.premiumCurrency}");
         cm.ResetMpsAfterLoad();
 
         UpgradeButton[] upgrades = FindObjectsByType<UpgradeButton>(FindObjectsInactive.Include, FindObjectsSortMode.None);
@@ -310,11 +392,19 @@ public class SaveSystem : MonoBehaviour
             foreach (var card in CardManager.Instance.cards)
             {
                 string prefix = "Save_Card_" + card.type.ToString() + "_";
+                int oldLvl = card.currentLevel;
+                int oldCop = card.copiesOwned;
                 card.currentLevel = PlayerPrefs.GetInt(prefix + "Level", card.currentLevel);
                 card.copiesOwned = PlayerPrefs.GetInt(prefix + "Copies", card.copiesOwned);
+                if (card.copiesOwned != oldCop || card.currentLevel != oldLvl)
+                    Debug.Log($"[SaveSystem] LOAD card {card.type}: was L{oldLvl} copies={oldCop} → now L{card.currentLevel} copies={card.copiesOwned}");
             }
 
             CardManager.Instance.ReapplyAllCardEffects();
+        }
+        else
+        {
+            Debug.LogWarning("[SaveSystem] LoadGame: CardManager.Instance or cards is NULL — card data NOT loaded!");
         }
 
         // NitroMagnet state
@@ -330,11 +420,29 @@ public class SaveSystem : MonoBehaviour
             PopularityManager.Instance.Set(savedPop, "SaveSystem.LoadGame");
         }
 
-        // PoliceCatchTrigger: radar catch counter + pending flag
+        // PoliceCatchTrigger: radar catch counter + pending flag + cooldown
         // Load state first, then after all init is done call TryFirePendingPoliceCatch()
         if (PoliceCatchTrigger.Instance != null)
         {
             PoliceCatchTrigger.Instance.LoadState();
+        }
+
+        // NitroRain progress
+        if (NitroRainController.Instance != null)
+        {
+            NitroRainController.Instance.LoadState();
+        }
+
+        // GarageManager bonus state
+        if (GarageManagerController.Instance != null)
+        {
+            GarageManagerController.Instance.LoadState();
+        }
+
+        // AmbientHeat
+        if (AmbientHeatManager.Instance != null)
+        {
+            AmbientHeatManager.Instance.LoadState();
         }
 
         // Safety: ensure police chase is not active on load
@@ -359,6 +467,10 @@ public class SaveSystem : MonoBehaviour
 
         // Notify subscribers that game data is now loaded
         OnGameLoaded?.Invoke();
+
+        // Blacklist: ensure baseline snapshot is taken if this is a fresh tier
+        if (BlacklistManager.Instance != null)
+            BlacklistManager.Instance.EnsureInitialBaseline();
 
         // After all systems are initialized, check if there's a pending Police Chase
         // from a previous session. This does NOT start it immediately — it waits

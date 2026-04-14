@@ -146,6 +146,10 @@ public class MomentumController : MonoBehaviour
                 int oldStacks = _currentStacks;
                 _currentStacks = 0;
 
+                // T2: Momentum reset SFX
+                if (SFXManager.Instance != null)
+                    SFXManager.Instance.PlayMomentumReset();
+
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 if (verboseLogs)
                     Debug.Log($"[Momentum] Stacks RESET (timeout {window:F2}s exceeded). Was {oldStacks}.");
@@ -212,6 +216,10 @@ public class MomentumController : MonoBehaviour
         }
 
         OnMomentumChanged?.Invoke(_currentStacks, multiplier);
+
+        // T1: Momentum tick SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayMomentumTick(_currentStacks, CurrentStackCap);
     }
 
     // ==================== PARAMETER FUNCTIONS ====================
@@ -276,5 +284,10 @@ public class MomentumController : MonoBehaviour
         _currentStacks = 0;
         _lastClickTime = -999f;
         OnMomentumChanged?.Invoke(0, 1f);
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 }

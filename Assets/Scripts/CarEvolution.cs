@@ -37,6 +37,10 @@ public class CarEvolution : MonoBehaviour
     {
         currentStage = stage;
 
+        // T4: Car evolution stage change SFX
+        if (SFXManager.Instance != null)
+            SFXManager.Instance.PlayCarEvolution();
+
         switch (stage)
         {
             case 0:

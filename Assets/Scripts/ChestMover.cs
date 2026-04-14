@@ -4,7 +4,12 @@ public class ChestMover : MonoBehaviour
 {
     [Header("Movement")]
     public Transform bottomTarget;   // yolun alt ucu
+
+    [Tooltip("Fallback speed if WorldScrollSpeed is not present. Ignored when WorldScrollSpeed exists.")]
     public float moveSpeed = 3f;
+
+    /// <summary>Uses the local moveSpeed field (tuned per-object, not tied to road scroll).</summary>
+    private float CurrentSpeed => moveSpeed;
 
     private Vector3 finalPos;
 
@@ -35,7 +40,7 @@ public class ChestMover : MonoBehaviour
         transform.position = current;
 
         Vector3 dir = (finalPos - transform.position).normalized;
-        transform.position += dir * moveSpeed * Time.deltaTime;
+        transform.position += dir * CurrentSpeed * Time.deltaTime;
 
         // hedefi geçince yok et
         if (Vector3.Dot(finalPos - transform.position, dir) <= 0f)

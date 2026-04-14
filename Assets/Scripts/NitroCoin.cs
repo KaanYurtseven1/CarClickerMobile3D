@@ -4,6 +4,18 @@ using DG.Tweening;
 
 public class NitroCoin : MonoBehaviour
 {
+    /// <summary>
+    /// Fired when a nitro coin is collected in the world (tap, magnet, or rain).
+    /// Passes the reward amount. Used by BlacklistStatTracker.
+    /// </summary>
+    public static event Action<int> OnWorldNitroCollected;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticsNitroCoin()
+    {
+        OnWorldNitroCollected = null;
+    }
+
     [Header("Reward")]
     [Tooltip("Bu coin'e tıkladığında kaç Nitro Coin verecek")]
     public int rewardAmount = 1;
@@ -16,6 +28,7 @@ public class NitroCoin : MonoBehaviour
     public Transform ArcTargetTransform => arcTarget != null ? arcTarget : transform;
 
     [Header("Movement")]
+    [Tooltip("Fallback speed if WorldScrollSpeed is not present. Ignored when WorldScrollSpeed exists.")]
     public float speed = 8f;
 
     // Spawner set edecek
@@ -97,16 +110,20 @@ public class NitroCoin : MonoBehaviour
 
     // ── NORMAL MOVEMENT ──
 
+    /// <summary>Uses the local speed field (tuned per-object, not tied to road scroll).</summary>
+    private float CurrentSpeed => speed;
+
     private void UpdateNormalMovement()
     {
+        float frameSpeed = CurrentSpeed;
         if (rb != null && rb.isKinematic)
         {
-            Vector3 movement = new Vector3(0f, 0f, moveDirSign * speed * Time.deltaTime);
+            Vector3 movement = new Vector3(0f, 0f, moveDirSign * frameSpeed * Time.deltaTime);
             rb.MovePosition(transform.position + movement);
         }
         else
         {
-            transform.Translate(0f, 0f, moveDirSign * speed * Time.deltaTime, Space.World);
+            transform.Translate(0f, 0f, moveDirSign * frameSpeed * Time.deltaTime, Space.World);
         }
 
         // Bottom çizgisini geçti mi?
@@ -136,6 +153,10 @@ public class NitroCoin : MonoBehaviour
         magnetPhase = MagnetPhase.Pull;
         pullElapsed = 0f;
         pullVelocity = Vector3.zero;
+
+        // N10: Magnetic pull start SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayMagnetPull();
+
         pullDuration = magnetTarget != null
             ? Mathf.Max(0.35f, Vector3.Distance(transform.position, magnetTarget.position) / Mathf.Max(magnetPullSpeed, 1f))
             : 1f;
@@ -278,6 +299,9 @@ public class NitroCoin : MonoBehaviour
             return;
         isCollected = true;
 
+        // N2: Magnet-collected coin SFX (softer)
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayNitroCoinMagnet();
+
         KillDriftTween();
         CleanupVFX();
 
@@ -300,6 +324,8 @@ public class NitroCoin : MonoBehaviour
             CardManager.Instance.NotifyNitroCollected(rewardAmount);
         }
 
+        OnWorldNitroCollected?.Invoke(rewardAmount);
+
         Destroy(gameObject);
     }
 
@@ -312,6 +338,9 @@ public class NitroCoin : MonoBehaviour
         if (isCollected)
             return;
         isCollected = true;
+
+        // N1: Nitro coin tap-collect SFX
+        if (SFXManager.Instance != null) SFXManager.Instance.PlayNitroCoinCollect();
 
         // If being pulled by magnet, notify controller that player "stole" it
         if (magnetPhase != MagnetPhase.None && NitroMagnetController.Instance != null)
@@ -358,6 +387,8 @@ public class NitroCoin : MonoBehaviour
         {
             CardManager.Instance.NotifyNitroCollected(rewardAmount);
         }
+
+        OnWorldNitroCollected?.Invoke(rewardAmount);
 
         Destroy(gameObject);
     }

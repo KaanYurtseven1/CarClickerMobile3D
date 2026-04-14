@@ -27,6 +27,10 @@ public class BoostModeEffectsIntegration : MonoBehaviour
     [Tooltip("Economy multiplier during boost (MPS and MPT) - dynamically calculated from card level")]
     public float boostEconomyMultiplier = 20f;
 
+    [Header("Road Speed Boost")]
+    [Tooltip("Road scroll speed multiplier during boost. Higher = road scrolls faster = stronger speed feel.")]
+    public float roadSpeedMultiplier = 2.5f;
+
     [Header("Debug")]
     [Tooltip("Enable verbose logging (Editor/Development builds only)")]
     public bool verboseLogs = true;
@@ -55,6 +59,15 @@ public class BoostModeEffectsIntegration : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
+
+            // DontDestroyOnLoad only works on ROOT GameObjects.
+            // BoostModeEffectsIntegration lives under VFX > VFX & Effects; detach first.
+            if (transform.parent != null)
+            {
+                Debug.Log($"[BoostIntegration] Detaching from parent '{transform.parent.name}' for DontDestroyOnLoad.");
+                transform.SetParent(null);
+            }
+
             DontDestroyOnLoad(gameObject);
         }
         else if (Instance != this)
@@ -175,10 +188,17 @@ public class BoostModeEffectsIntegration : MonoBehaviour
 
     // ==================== CAR & VFX CACHING ====================
 
-    private void CacheCarAndVFX()
+    private void CacheCarAndVFX(Transform explicitCar = null)
     {
-        // Find car by tag
-        _carObject = GameObject.FindGameObjectWithTag("Car");
+        // Use explicit car if provided, otherwise find by tag
+        if (explicitCar != null)
+        {
+            _carObject = explicitCar.gameObject;
+        }
+        else
+        {
+            _carObject = GameObject.FindGameObjectWithTag("Car");
+        }
 
         if (_carObject == null)
         {
@@ -194,9 +214,9 @@ public class BoostModeEffectsIntegration : MonoBehaviour
 
         _warnedMissingCar = false;
 
-        // Find VFX children (search recursively)
-        Transform leftVFX = FindChildRecursive(_carObject.transform, "BoostFX_L");
-        Transform rightVFX = FindChildRecursive(_carObject.transform, "BoostFX_R");
+        // Find VFX children by prefix (handles Unity suffixed names like "BoostFX_L (1)")
+        Transform leftVFX = FindChildByPrefix(_carObject.transform, "BoostFX_L");
+        Transform rightVFX = FindChildByPrefix(_carObject.transform, "BoostFX_R");
 
         _boostFXLeft = leftVFX != null ? leftVFX.gameObject : null;
         _boostFXRight = rightVFX != null ? rightVFX.gameObject : null;
@@ -243,6 +263,31 @@ public class BoostModeEffectsIntegration : MonoBehaviour
         return null;
     }
 
+    /// <summary>
+    /// Searches for a child whose name equals the prefix or starts with "prefix " (e.g. "BoostFX_L (1)").
+    /// Checks direct children first, then recurses.
+    /// </summary>
+    private static Transform FindChildByPrefix(Transform parent, string prefix)
+    {
+        if (parent == null) return null;
+
+        // Direct children first (most common case)
+        foreach (Transform child in parent)
+        {
+            if (child.name == prefix || child.name.StartsWith(prefix + " "))
+                return child;
+        }
+
+        // Recursive fallback
+        foreach (Transform child in parent)
+        {
+            Transform found = FindChildByPrefix(child, prefix);
+            if (found != null) return found;
+        }
+
+        return null;
+    }
+
     // ==================== BOOST EVENT HANDLERS ====================
 
     private void HandleBoostStarted(float duration)
@@ -264,6 +309,9 @@ public class BoostModeEffectsIntegration : MonoBehaviour
 
         // Apply economy multiplier (use calculated value, not inspector value)
         ApplyEconomyMultiplier(actualMultiplier);
+
+        // Speed up road scroll
+        ApplyRoadSpeedMultiplier(roadSpeedMultiplier);
     }
 
     private void HandleBoostEnded()
@@ -280,6 +328,9 @@ public class BoostModeEffectsIntegration : MonoBehaviour
 
         // Reset economy multiplier
         ApplyEconomyMultiplier(1f);
+
+        // Reset road scroll speed
+        ApplyRoadSpeedMultiplier(1f);
     }
 
     // ==================== VFX CONTROL ====================
@@ -323,6 +374,21 @@ public class BoostModeEffectsIntegration : MonoBehaviour
         }
     }
 
+    // ==================== ROAD SPEED ====================
+
+    private void ApplyRoadSpeedMultiplier(float multiplier)
+    {
+        if (WorldScrollSpeed.Instance != null)
+        {
+            WorldScrollSpeed.Instance.SpeedMultiplier = multiplier;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (verboseLogs)
+                Debug.Log($"[BoostIntegration] Road speed multiplier set to x{multiplier} (effective: {WorldScrollSpeed.Instance.EffectiveSpeed:F1})");
+#endif
+        }
+    }
+
     // ==================== STATE RECOVERY ====================
 
     /// <summary>
@@ -350,6 +416,7 @@ public class BoostModeEffectsIntegration : MonoBehaviour
             _boostCurrentlyActive = true;
             SetVFXActive(true);
             ApplyEconomyMultiplier(actualMultiplier);
+            ApplyRoadSpeedMultiplier(roadSpeedMultiplier);
         }
         else if (!isActive && _boostCurrentlyActive)
         {
@@ -357,6 +424,7 @@ public class BoostModeEffectsIntegration : MonoBehaviour
             _boostCurrentlyActive = false;
             SetVFXActive(false);
             ApplyEconomyMultiplier(1f);
+            ApplyRoadSpeedMultiplier(1f);
         }
     }
 
@@ -365,13 +433,13 @@ public class BoostModeEffectsIntegration : MonoBehaviour
     /// <summary>
     /// Forces a refresh of car and VFX references. Call this if the car is spawned dynamically.
     /// </summary>
-    public void RefreshCarReference()
+    public void RefreshCarReference(Transform activeCar = null)
     {
         _warnedMissingCar = false;
         _warnedMissingVFX = false;
-        CacheCarAndVFX();
+        CacheCarAndVFX(activeCar);
 
-        // If boost is active, ensure VFX is on
+        // If boost is active, ensure VFX is on for the new car
         if (_boostCurrentlyActive)
         {
             SetVFXActive(true);

@@ -1,0 +1,110 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5f9e9b74adb1ef146a92681d7b426532, type: 3}
+  m_Name: BlacklistTier_ 5
+  m_EditorClassIdentifier: Assembly-CSharp::BlacklistTierSO
+  tierIndex: 1
+  tierDisplayName: BLACKLIST #1
+  carName: JMP-BUGATTI
+  carImage: {fileID: 0}
+  rewardCar: {fileID: 11400000, guid: fb02849359dcd2b48816ec9becdb8542, type: 2}
+  missions:
+  - missionType: 0
+    mode: 0
+    targetValue: 50000000000000
+    description: Earn 50T gold
+    icon: {fileID: 21300000, guid: d6145517aee12374b938124e8890acc5, type: 3}
+    reward:
+      goldAmount: 10000000000000
+      nitroAmount: 0
+      popularityReset: 0
+      heatReset: 0
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 0
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: de8ce0bb1e237604b870dd358540c6dd, type: 3}
+      rewardDisplayText: +10T Gold
+  - missionType: 5
+    mode: 0
+    targetValue: 50
+    description: Use boost 50 times
+    icon: {fileID: 21300000, guid: 27c81dd2a3b48634fa80891e63a60ee1, type: 3}
+    reward:
+      goldAmount: 0
+      nitroAmount: 60
+      popularityReset: 0
+      heatReset: 0
+      freeChestCount: 0
+      boostDiscountUses: 10
+      boostDiscountMultiplier: 0.5
+      cardProgressAmount: 0
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: 0afa810927befb045a09d5411a485867, type: 3}
+      rewardDisplayText: +60 Nitro & 50% Cooldown x10
+  - missionType: 6
+    mode: 0
+    targetValue: 50
+    description: Escape police 50 times
+    icon: {fileID: 21300000, guid: b2f86bd9c1b8ad648a3765a8a929adab, type: 3}
+    reward:
+      goldAmount: 0
+      nitroAmount: 30
+      popularityReset: 1
+      heatReset: 1
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 0
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: c526a844dbc3b454c94ce844e8b23af8, type: 3}
+      rewardDisplayText: Pop+Heat Reset & +30 Nitro
+  - missionType: 12
+    mode: 1
+    targetValue: 30
+    description: Reach total card level 30
+    icon: {fileID: 21300000, guid: 5a54e95443e60324bb0fa3a4e50695d5, type: 3}
+    reward:
+      goldAmount: 0
+      nitroAmount: 0
+      popularityReset: 0
+      heatReset: 0
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 20
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 0
+      rewardIcon: {fileID: 21300000, guid: 9f21b1d0ae9ea3b4188210b2ff477a89, type: 3}
+      rewardDisplayText: +20 Card Progress
+  - missionType: 8
+    mode: 1
+    targetValue: 50
+    description: Buy 50 garage parts
+    icon: {fileID: 21300000, guid: 79551177dbd87b04e89d35f919d5a357, type: 3}
+    reward:
+      goldAmount: 0
+      nitroAmount: 0
+      popularityReset: 0
+      heatReset: 0
+      freeChestCount: 0
+      boostDiscountUses: 0
+      boostDiscountMultiplier: 0
+      cardProgressAmount: 0
+      freeKaplamaCount: 0
+      unlockAllCosmeticsForOtherCars: 1
+      rewardIcon: {fileID: 21300000, guid: ccd5ed25a1598004f9d65ee78897620c, type: 3}
+      rewardDisplayText: Unlock All Cosmetics

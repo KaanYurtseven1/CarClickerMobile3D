@@ -48,7 +48,9 @@ public class CarCustomizer : MonoBehaviour
 
     /// <summary>
     /// Applies the given material to every renderer in <see cref="bodyRenderers"/>
-    /// using <c>sharedMaterial</c> (no runtime copy).
+    /// plus the root object's own Renderer (if any), using <c>sharedMaterial</c> (no runtime copy).
+    /// The root Renderer is applied unconditionally because prefab instances in
+    /// different scenes may have incomplete bodyRenderers lists.
     /// </summary>
     public void ApplySkin(Material mat)
     {
@@ -57,6 +59,11 @@ public class CarCustomizer : MonoBehaviour
             Debug.LogWarning($"[CarCustomizer:{gameObject.name}] ApplySkin called with null material.");
             return;
         }
+
+        // Always include the root object's own renderer (may be missing from the serialized list)
+        Renderer rootRenderer = GetComponent<Renderer>();
+        if (rootRenderer != null)
+            rootRenderer.sharedMaterial = mat;
 
         for (int i = 0; i < bodyRenderers.Count; i++)
         {

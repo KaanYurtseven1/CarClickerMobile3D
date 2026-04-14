@@ -31,7 +31,8 @@ public class PanelTransitionManager : MonoBehaviour
     [SerializeField] private Ease closeEase = Ease.InCubic;
 
     private BottomTab currentTab = BottomTab.Clicker;
-    private RectTransform currentPanel; // null => clicker
+    private BottomTab pendingTab;          // the tab we are transitioning TO
+    private RectTransform currentPanel;    // null => clicker
     private Sequence seq;
     private bool isTransitioning = false;
 
@@ -44,6 +45,7 @@ public class PanelTransitionManager : MonoBehaviour
             seq = null;
         }
         isTransitioning = false;
+        if (Instance == this) Instance = null;
     }
 
     private void Awake()
@@ -68,78 +70,112 @@ public class PanelTransitionManager : MonoBehaviour
 
     public void SwitchTo(BottomTab targetTab)
     {
-        if (isTransitioning) return;
-        if (targetTab == currentTab) return;
+        // If already on this tab and not mid-transition, nothing to do
+        if (targetTab == currentTab && !isTransitioning) return;
+        // If mid-transition toward the same tab, let it finish
+        if (isTransitioning && targetTab == pendingTab) return;
+
+        // U2/U3: Panel transition SFX
+        if (SFXManager.Instance != null)
+        {
+            if (targetTab == BottomTab.Clicker)
+                SFXManager.Instance.PlayPanelClose();
+            else
+                SFXManager.Instance.PlayPanelOpen();
+        }
+
+        // ── Kill any running sequence ──
+        if (seq != null && seq.IsActive()) seq.Kill();
+        seq = null;
+
+        // Determine who is visually on-screen right now.
+        // During a transition the *old* panel may still be animating out while
+        // the *pending* panel is animating in. After seq.Kill() both freeze
+        // wherever they are. We need to close anything that is still visible.
+        RectTransform oldPanel = currentPanel;          // panel that *was* settled before any transition
+        RectTransform interruptedPanel = null;          // panel that was mid-open when interrupted
+
+        if (isTransitioning)
+        {
+            RectTransform pendingPanel = GetPanel(pendingTab);
+            // The pending panel was in the process of opening — it's the one to close
+            if (pendingPanel != null && pendingPanel.gameObject.activeSelf)
+                interruptedPanel = pendingPanel;
+
+            // The old panel that was closing may also still be visible
+            if (oldPanel != null && oldPanel != interruptedPanel && oldPanel.gameObject.activeSelf)
+            {
+                // Snap the old one closed immediately (it was already leaving)
+                oldPanel.DOKill();
+                CanvasGroup oldCg = GetOrAddCanvasGroup(oldPanel);
+                oldCg.DOKill();
+                SetPanelActive(oldPanel, false);
+            }
+        }
+
+        isTransitioning = false;
+
+        // The panel we need to animate closed is whichever one is still on-screen
+        RectTransform panelToClose = interruptedPanel ?? oldPanel;
 
         RectTransform targetPanel = GetPanel(targetTab);
         bool isGoingToClicker = (targetTab == BottomTab.Clicker);
-        bool isCurrentlyPanelOpen = (currentPanel != null);
 
-        // ── UI-flow suppression: set IMMEDIATELY so spawners/taps freeze
-        //    even while the panel-open animation is playing. ──
+        // Guard: if the target panel reference is missing, abort to avoid corrupted state
+        if (!isGoingToClicker && targetPanel == null)
+        {
+            Debug.LogError($"[PanelTransitionManager] panelRanking or target panel for {targetTab} is not assigned in Inspector! Aborting switch.");
+            isTransitioning = false;
+            return;
+        }
+
+        // ── UI-flow suppression ──
         bool suppress = !isGoingToClicker;
         UIFlowState.IsContentPanelOpen = suppress;
         Debug.Log($"[PanelTransitionManager] SwitchTo {targetTab} — UIFlowState.IsContentPanelOpen = {suppress}");
 
-        if (seq != null && seq.IsActive()) seq.Kill();
-
-        // Create new sequence with SetUpdate(true) for UI (ignores timeScale)
+        // ── Build new sequence ──
         seq = DOTween.Sequence()
             .SetLink(gameObject, LinkBehaviour.KillOnDestroy)
             .SetUpdate(true);
         isTransitioning = true;
+        pendingTab = targetTab;
 
-        // --- CASE 1: Panel -> Clicker (close current, no open) ---
-        if (isCurrentlyPanelOpen && isGoingToClicker)
+        // --- Step 1: Close whatever is currently visible (from its CURRENT position) ---
+        bool hasPanelToClose = (panelToClose != null && panelToClose.gameObject.activeSelf);
+
+        if (hasPanelToClose)
         {
-            RectTransform panelToClose = currentPanel;
-            seq.Append(ClosePanelTween(panelToClose));
+            RectTransform closingRef = panelToClose; // capture for lambda
+            seq.Append(ClosePanelFromCurrentState(closingRef));
             seq.AppendCallback(() =>
             {
-                SetPanelActive(panelToClose, false);
-                if (topBarAnimator != null) topBarAnimator.SetCompact(false);
-                if (clickerRoot != null) clickerRoot.SetActive(true);
+                SetPanelActive(closingRef, false);
+                // If going to Clicker, un-compact topbar and show clicker
+                if (isGoingToClicker)
+                {
+                    if (topBarAnimator != null) topBarAnimator.SetCompact(false);
+                    if (clickerRoot != null) clickerRoot.SetActive(true);
+                }
             });
-            seq.OnComplete(() =>
-            {
-                currentPanel = null;
-                currentTab = BottomTab.Clicker;
-                isTransitioning = false;
-            });
-            seq.Play();
-            return;
         }
 
-        // --- CASE 2: Panel -> Panel (close current, then open target) ---
-        if (isCurrentlyPanelOpen && !isGoingToClicker)
+        // --- Step 2: Open target panel (unless going to Clicker) ---
+        if (!isGoingToClicker && targetPanel != null)
         {
-            RectTransform panelToClose = currentPanel;
-            // 1) Close current panel (animate down)
-            seq.Append(ClosePanelTween(panelToClose));
-            seq.AppendCallback(() =>
+            // Hide clicker root when opening a panel
+            if (!hasPanelToClose)
             {
-                SetPanelActive(panelToClose, false);
-            });
-            // 2) Then open target panel (animate up)
+                // Clicker -> Panel: compact the topbar first
+                seq.AppendCallback(() =>
+                {
+                    if (topBarAnimator != null) topBarAnimator.SetCompact(true);
+                });
+            }
             seq.Append(OpenPanelTween(targetPanel));
-            seq.OnComplete(() =>
-            {
-                currentPanel = targetPanel;
-                currentTab = targetTab;
-                isTransitioning = false;
-            });
-            seq.Play();
-            return;
         }
 
-        // --- CASE 3: Clicker -> Panel (just open target) ---
-        // 1) Compact topbar
-        seq.AppendCallback(() =>
-        {
-            if (topBarAnimator != null) topBarAnimator.SetCompact(true);
-        });
-        // 2) Open target panel
-        seq.Append(OpenPanelTween(targetPanel));
+        // --- Finalize ---
         seq.OnComplete(() =>
         {
             currentPanel = targetPanel;
@@ -202,6 +238,40 @@ public class PanelTransitionManager : MonoBehaviour
         s.Join(panel.DOAnchorPosY(-h, closeDuration).SetEase(closeEase));
         s.Join(cg.DOFade(0f, closeDuration * 0.9f).SetEase(Ease.InQuad));
         // NOTE: SetPanelActive(false) is now handled by the caller after this tween completes
+        return s;
+    }
+
+    /// <summary>
+    /// Closes a panel from whatever position/alpha it is currently at.
+    /// Duration is proportional to how far it still needs to travel,
+    /// so a barely-open panel closes almost instantly.
+    /// </summary>
+    private Tween ClosePanelFromCurrentState(RectTransform panel)
+    {
+        if (panel == null) return null;
+
+        panel.DOKill();
+
+        float h = GetPanelHeight(panel);
+        float targetY = -h;
+        float currentY = panel.anchoredPosition.y;
+
+        // How far along the open range (0 = fully closed, 1 = fully open)
+        float openRatio = Mathf.Clamp01(1f - Mathf.Abs(currentY) / Mathf.Max(h, 1f));
+
+        // Scale duration proportionally (at least a tiny amount to avoid zero-length tween)
+        float duration = Mathf.Max(closeDuration * openRatio, 0.05f);
+
+        CanvasGroup cg = GetOrAddCanvasGroup(panel);
+        cg.DOKill();
+        cg.interactable = false;
+        cg.blocksRaycasts = false;
+
+        Sequence s = DOTween.Sequence()
+            .SetLink(panel.gameObject, LinkBehaviour.KillOnDestroy)
+            .SetUpdate(true);
+        s.Join(panel.DOAnchorPosY(targetY, duration).SetEase(closeEase));
+        s.Join(cg.DOFade(0f, duration * 0.9f).SetEase(Ease.InQuad));
         return s;
     }
 

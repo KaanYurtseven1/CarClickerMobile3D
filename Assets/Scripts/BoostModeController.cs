@@ -23,7 +23,6 @@ public class BoostModeController : MonoBehaviour
     public float boostDurationSeconds = 10f;
     [Tooltip("Cooldown in seconds (dynamically set by card level)")]
     public float cooldownSeconds = 30f;
-    public bool hideBarDuringActive = false;
 
     private BoostState currentState = BoostState.Locked;
     private float stateTimer = 0f;
@@ -45,6 +44,7 @@ public class BoostModeController : MonoBehaviour
     [Header("UI References")]
     public Slider boostBarSlider;
     public GameObject boostBarRoot;
+    private CanvasGroup boostBarCanvasGroup;
 
     [Header("Charge Settings")]
     public int chargePerNitro = 1;
@@ -87,16 +87,16 @@ public class BoostModeController : MonoBehaviour
     /// </summary>
     public static (float multiplier, float cooldown, int maxCharge, float duration) GetBoostParamsForLevel(int level)
     {
-        if (level <= 0) return (1f, 60f, 5, 6f);
+        if (level <= 0) return (1f, 60f, 4, 6f);
 
         // Clamp to max level 6
         level = Mathf.Clamp(level, 1, 6);
 
         // Tuning tables (index 0 = L1)
         float[] multipliers = { 3f, 5f, 8f, 12f, 16f, 20f };
-        float[] durations = { 6f, 8f, 10f, 12f, 14f, 16f };
-        float[] cooldowns = { 60f, 55f, 48f, 40f, 32f, 25f };
-        int[] charges = { 5, 7, 9, 12, 15, 18 };
+        float[] durations = { 8f, 8f, 10f, 12f, 14f, 16f };
+        float[] cooldowns = { 45f, 55f, 48f, 40f, 32f, 25f };
+        int[] charges = { 4, 7, 9, 12, 15, 18 };
 
         int idx = level - 1;
         return (multipliers[idx], cooldowns[idx], charges[idx], durations[idx]);
@@ -130,11 +130,22 @@ public class BoostModeController : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
+
+            // DontDestroyOnLoad only works on ROOT GameObjects.
+            // BoostModeController lives as a child of the Nitro prefab; detach first.
+            if (transform.parent != null)
+            {
+                Debug.Log($"[Boost] Detaching from parent '{transform.parent.name}' for DontDestroyOnLoad.");
+                transform.SetParent(null);
+            }
+
             DontDestroyOnLoad(gameObject);
             SubscribeSceneLoaded();
+            Debug.Log($"[Boost] Instance assigned (ID={GetInstanceID()}), DontDestroyOnLoad applied.");
         }
         else if (Instance != this)
         {
+            Debug.Log($"[Boost] Duplicate detected (ID={GetInstanceID()}), destroying. Keeping ID={Instance.GetInstanceID()}");
             Destroy(gameObject);
             return;
         }
@@ -142,15 +153,20 @@ public class BoostModeController : MonoBehaviour
 
     private void OnDestroy()
     {
+        FlushSave(); // Persist charge/timer before this instance is destroyed
         if (Instance == this) Instance = null;
         UnsubscribeSceneLoaded();
         UnsubscribeFromSaveSystem();
+        UnsubscribeTopBarAnimator();
+        UnsubscribeFromCards();
     }
 
     private void OnDisable()
     {
         UnsubscribeSceneLoaded();
         UnsubscribeFromSaveSystem();
+        UnsubscribeTopBarAnimator();
+        UnsubscribeFromCards();
     }
 
     private void OnEnable()
@@ -161,6 +177,8 @@ public class BoostModeController : MonoBehaviour
     private void Start()
     {
         TryBindUI();
+        SubscribeTopBarAnimator();
+        SubscribeToCards();
         RefreshUnlockState();
         LoadState();
     }
@@ -205,16 +223,46 @@ public class BoostModeController : MonoBehaviour
         }
     }
 
+    // =============== CARD CHANGE SUBSCRIPTION ===============
+
+    private bool _cardsSubscribed = false;
+
+    private void SubscribeToCards()
+    {
+        if (_cardsSubscribed) return;
+        if (CardManager.Instance != null)
+        {
+            CardManager.Instance.OnCardsChanged += OnCardsChanged;
+            _cardsSubscribed = true;
+        }
+    }
+
+    private void UnsubscribeFromCards()
+    {
+        if (!_cardsSubscribed) return;
+        if (CardManager.Instance != null)
+            CardManager.Instance.OnCardsChanged -= OnCardsChanged;
+        _cardsSubscribed = false;
+    }
+
+    /// <summary>
+    /// Called when CardManager detects card copies/level changes (e.g. chest reward, daily offer).
+    /// This lets BoostModeController detect mid-scene card unlocks immediately.
+    /// </summary>
+    private void OnCardsChanged()
+    {
+        Debug.Log("[Boost] OnCardsChanged received — refreshing unlock state.");
+        RefreshUnlockState();
+    }
+
     /// <summary>
     /// Called when SaveSystem finishes loading game data.
     /// Refreshes unlock state since card levels are now loaded.
     /// </summary>
     private void OnGameLoaded()
     {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        if (verboseLogs)
-            Debug.Log("[Boost] OnGameLoaded received. Refreshing unlock state...");
-#endif
+        Debug.Log("[Boost] OnGameLoaded received. Refreshing unlock state...");
+        SubscribeToCards(); // Retry if CardManager wasn't available at Start
         RefreshUnlockState();
         UpdateUI();
     }
@@ -222,23 +270,82 @@ public class BoostModeController : MonoBehaviour
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
         _warnedMissingUI = false; // Reset warning for new scene
+
+        // Clear stale UI refs from the previous scene so TryBindUI re-finds them.
+        boostBarSlider = null;
+        boostBarRoot = null;
+        boostBarCanvasGroup = null;
+        _topBarSubscribed = false; // TopBarAnimator is a new instance in the new scene
+
         TryBindUI();
+        SubscribeTopBarAnimator();
+        SubscribeToCards();
         RefreshUnlockState();
+        Debug.Log($"[Boost] OnSceneLoaded('{scene.name}'): state={currentState}, unlocked={isUnlocked}, charge={currentCharge}/{maxCharge}, UI bound={(boostBarSlider != null)}");
+    }
+
+    private bool _topBarSubscribed;
+
+    private void SubscribeTopBarAnimator()
+    {
+        if (_topBarSubscribed) return;
+        if (TopBarAnimator.Instance != null)
+        {
+            TopBarAnimator.Instance.OnCompactChanged += OnTopBarCompactChanged;
+            _topBarSubscribed = true;
+
+            // Exclude boost bar from TopBarAnimator's hideGroups so only
+            // BoostModeController controls its SetActive/alpha.
+            if (boostBarCanvasGroup != null)
+                TopBarAnimator.Instance.ExcludeFromCompact(boostBarCanvasGroup);
+        }
+    }
+
+    private void UnsubscribeTopBarAnimator()
+    {
+        if (!_topBarSubscribed) return;
+        if (TopBarAnimator.Instance != null)
+        {
+            TopBarAnimator.Instance.OnCompactChanged -= OnTopBarCompactChanged;
+            if (boostBarCanvasGroup != null)
+                TopBarAnimator.Instance.IncludeInCompact(boostBarCanvasGroup);
+        }
+        _topBarSubscribed = false;
+    }
+
+    /// <summary>
+    /// After TopBarAnimator finishes its compact/expand transition,
+    /// reassert boost bar visibility based on current boost state.
+    /// </summary>
+    private void OnTopBarCompactChanged(bool compact)
+    {
+        UpdateUI();
     }
 
     private void TryBindUI()
     {
         if (boostBarSlider == null)
         {
-            var sliderObj = GameObject.Find("Canvas/TopBar/Slider_BoostBar");
+            // Slider_BoostBar starts INACTIVE in the scene. GameObject.Find only
+            // returns active objects, so we use Transform.Find from the Canvas root
+            // which works regardless of active state.
+            GameObject sliderObj = null;
+            var canvas = GameObject.Find("Canvas");
+            if (canvas != null)
+            {
+                var t = canvas.transform.Find("TopBar/Slider_BoostBar");
+                if (t != null) sliderObj = t.gameObject;
+            }
+
+            // Fallback: try the old global find in case hierarchy differs
+            if (sliderObj == null)
+                sliderObj = GameObject.Find("Canvas/TopBar/Slider_BoostBar");
+
             if (sliderObj != null)
             {
                 boostBarSlider = sliderObj.GetComponent<Slider>();
                 boostBarRoot = sliderObj;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                if (verboseLogs)
-                    Debug.Log($"[Boost] Bound BoostBar slider: {sliderObj.name}");
-#endif
+                Debug.Log($"[Boost] Bound BoostBar slider via Transform.Find: {sliderObj.name}");
             }
             else if (!_warnedMissingUI)
             {
@@ -249,6 +356,14 @@ public class BoostModeController : MonoBehaviour
         if (boostBarRoot == null && boostBarSlider != null)
         {
             boostBarRoot = boostBarSlider.gameObject;
+        }
+        if (boostBarRoot != null && boostBarCanvasGroup == null)
+        {
+            boostBarCanvasGroup = boostBarRoot.GetComponent<CanvasGroup>();
+            // If we found a new CG and TopBarAnimator is already subscribed,
+            // exclude it so TopBarAnimator doesn't control our bar.
+            if (boostBarCanvasGroup != null && _topBarSubscribed && TopBarAnimator.Instance != null)
+                TopBarAnimator.Instance.ExcludeFromCompact(boostBarCanvasGroup);
         }
     }
 
@@ -271,37 +386,33 @@ public class BoostModeController : MonoBehaviour
             boostDurationSeconds = parameters.duration;
         }
 
+        bool wasUnlocked = isUnlocked;
         isUnlocked = level >= 1;
         if (isUnlocked && currentState == BoostState.Locked)
         {
+            Debug.Log($"[Boost] Card JUST UNLOCKED! Level={level}, wasUnlocked={wasUnlocked}. Transitioning Locked -> Charging.");
             SetState(BoostState.Charging);
         }
         else if (!isUnlocked)
         {
             SetState(BoostState.Locked);
         }
-        if (boostBarRoot != null)
-            boostBarRoot.SetActive(isUnlocked);
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        if (verboseLogs)
-            Debug.Log($"[Boost] BoostBar visible: {isUnlocked} (BoostModeLevel={level}, MaxCharge={maxCharge}, Cooldown={cooldownSeconds}s)");
-#endif
+        UpdateUI();
+        Debug.Log($"[Boost] RefreshUnlockState: owned={isUnlocked}, state={currentState}, level={level}, " +
+                  $"charge={currentCharge}/{maxCharge}, duration={boostDurationSeconds}s, cooldown={cooldownSeconds}s, " +
+                  $"UI bound={(boostBarSlider != null)}");
     }
 
     public void OnNitroCollected(int amount)
     {
         if (!isUnlocked)
         {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (verboseLogs) Debug.Log("[Boost] Ignored nitro: state=Locked");
-#endif
+            Debug.Log("[Boost] Ignored nitro: state=Locked (card not owned)");
             return;
         }
         if (currentState == BoostState.Active || currentState == BoostState.Cooldown)
         {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (verboseLogs) Debug.Log($"[Boost] Ignored nitro: state={currentState}");
-#endif
+            Debug.Log($"[Boost] Ignored nitro: state={currentState}");
             return;
         }
         if (currentState == BoostState.Charging)
@@ -309,23 +420,20 @@ public class BoostModeController : MonoBehaviour
             currentCharge += chargePerNitro * amount;
             if (currentCharge > maxCharge) currentCharge = maxCharge;
             if (amount > 0) OnNitroChargeAccepted?.Invoke();
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (verboseLogs)
-                Debug.Log($"[Boost] Nitro +{amount} => charge {currentCharge}/{maxCharge}");
-#endif
+            Debug.Log($"[Boost] Nitro +{amount} => charge {currentCharge}/{maxCharge} (fill={Charge01:F2})");
             UpdateUI();
             InvokeChargeEvents();
+            RequestSave(); // Persist charge progress so it survives scene transitions
             if (currentCharge >= maxCharge)
             {
+                Debug.Log("[Boost] Charge FULL — transitioning to Ready/Active");
                 SetState(BoostState.Ready);
             }
         }
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
         else if (currentState == BoostState.Ready)
         {
-            if (verboseLogs) Debug.Log("[Boost] Ignored nitro: state=Ready");
+            Debug.Log("[Boost] Ignored nitro: state=Ready");
         }
-#endif
     }
 
     private void InvokeChargeEvents()
@@ -336,15 +444,32 @@ public class BoostModeController : MonoBehaviour
 
     private void UpdateUI()
     {
+        bool stateAllows = isUnlocked && (currentState == BoostState.Charging
+                                        || currentState == BoostState.Ready
+                                        || currentState == BoostState.Active);
+
+        // Also hide when the TopBar is in compact mode (panel open / police chase)
+        // so the bar doesn't float in a collapsed header.
+        bool topBarVisible = TopBarAnimator.Instance == null || !TopBarAnimator.Instance.IsCompact;
+        bool show = stateAllows && topBarVisible;
+
         if (boostBarSlider != null)
         {
-            boostBarSlider.value = Charge01;
-            if (boostBarRoot != null)
+            if (currentState == BoostState.Active && boostDurationSeconds > 0f)
+                boostBarSlider.value = Mathf.Clamp01(stateTimer / boostDurationSeconds);
+            else
+                boostBarSlider.value = Charge01;
+        }
+
+        if (boostBarRoot != null)
+        {
+            boostBarRoot.SetActive(show);
+            // Restore CanvasGroup alpha — safety net in case something else set it to 0.
+            if (show && boostBarCanvasGroup != null)
             {
-                bool show = isUnlocked && (currentState == BoostState.Charging || currentState == BoostState.Ready);
-                if (hideBarDuringActive && currentState == BoostState.Active)
-                    show = false;
-                boostBarRoot.SetActive(show);
+                boostBarCanvasGroup.alpha = 1f;
+                boostBarCanvasGroup.interactable = true;
+                boostBarCanvasGroup.blocksRaycasts = true;
             }
         }
     }
@@ -354,6 +479,11 @@ public class BoostModeController : MonoBehaviour
         if (currentState == BoostState.Active || currentState == BoostState.Cooldown)
         {
             stateTimer -= Time.deltaTime;
+
+            // Keep the slider draining in real-time while boost is active
+            if (currentState == BoostState.Active && boostBarSlider != null && boostDurationSeconds > 0f)
+                boostBarSlider.value = Mathf.Clamp01(stateTimer / boostDurationSeconds);
+
             if (stateTimer <= 0f)
             {
                 if (currentState == BoostState.Active)
@@ -362,6 +492,7 @@ public class BoostModeController : MonoBehaviour
                 }
                 else if (currentState == BoostState.Cooldown)
                 {
+                    Debug.Log("[Boost] Cooldown COMPLETE — transitioning to Charging. Bar will show.");
                     SetState(BoostState.Charging);
                 }
             }
@@ -377,6 +508,7 @@ public class BoostModeController : MonoBehaviour
     private void SetState(BoostState newState)
     {
         if (currentState == newState) return;
+        var oldState = currentState;
         currentState = newState;
         OnStateChanged?.Invoke(newState);
         lastStateTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -385,18 +517,15 @@ public class BoostModeController : MonoBehaviour
             case BoostState.Locked:
                 currentCharge = 0;
                 UpdateUI();
+                Debug.Log("[Boost] State: Locked (card not owned). Bar hidden.");
                 break;
             case BoostState.Charging:
                 UpdateUI();
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                if (verboseLogs) Debug.Log("[Boost] State: Charging");
-#endif
+                Debug.Log($"[Boost] State: {oldState} -> Charging. Bar visible, charge={currentCharge}/{maxCharge}.");
                 break;
             case BoostState.Ready:
                 UpdateUI();
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                if (verboseLogs) Debug.Log("[Boost] State: Ready");
-#endif
+                Debug.Log($"[Boost] State: Charging -> Ready. Bar FULL. Auto-starting boost.");
                 // Fire OnBoostReady BEFORE auto-starting boost
                 OnBoostReady?.Invoke();
                 // Auto-start boost immediately
@@ -407,18 +536,24 @@ public class BoostModeController : MonoBehaviour
                 currentCharge = 0;
                 UpdateUI();
                 InvokeChargeEvents();
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                if (verboseLogs) Debug.Log("[Boost] State: Active");
-#endif
+                Debug.Log($"[Boost] State: Active. Turbo effect running for {boostDurationSeconds}s. Bar draining.");
                 OnBoostStarted?.Invoke(boostDurationSeconds);
                 break;
             case BoostState.Cooldown:
                 stateTimer = cooldownSeconds;
+
+                // Apply Blacklist boost-cooldown discount if available
+                var blClaim = BlacklistRewardClaimData.LoadFromPrefs();
+                if (blClaim.HasBoostDiscount)
+                {
+                    float mult = blClaim.ConsumeBoostDiscount();
+                    stateTimer *= mult;
+                    Debug.Log($"[Boost] Blacklist cooldown discount applied: x{mult}. Timer: {stateTimer:F1}s (base {cooldownSeconds}s).");
+                }
+
                 UpdateUI();
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                if (verboseLogs) Debug.Log("[Boost] State: Cooldown");
-#endif
-                OnBoostCooldownStarted?.Invoke(cooldownSeconds);
+                Debug.Log($"[Boost] State: Active -> Cooldown ({stateTimer:F1}s). Bar HIDDEN.");
+                OnBoostCooldownStarted?.Invoke(stateTimer);
                 break;
         }
         RequestSave();
@@ -429,11 +564,55 @@ public class BoostModeController : MonoBehaviour
         SetState(BoostState.Active);
     }
 
+    /// <summary>
+    /// DEBUG ONLY: Immediately skips the cooldown timer, transitioning to Charging.
+    /// No-op if the current state is not Cooldown.
+    /// </summary>
+    public void DebugSkipCooldown()
+    {
+        if (currentState != BoostState.Cooldown)
+        {
+            Debug.Log($"[Boost] DebugSkipCooldown: Not in Cooldown (state={currentState}). No-op.");
+            return;
+        }
+
+        stateTimer = 0f;
+        SetState(BoostState.Charging);
+        Debug.Log("[Boost] DebugSkipCooldown: Cooldown skipped, now Charging.");
+    }
+
+    /// <summary>
+    /// DEBUG ONLY: Immediately fills charge and triggers boost regardless of current state.
+    /// Does not permanently affect save data — state resets on restart.
+    /// </summary>
+    public void DebugForceBoost()
+    {
+        if (!isUnlocked)
+        {
+            // Temporarily unlock so boost can fire
+            isUnlocked = true;
+        }
+
+        // If already active, skip (let it finish naturally)
+        if (currentState == BoostState.Active)
+        {
+            Debug.Log("[Boost] DebugForceBoost: Boost already active.");
+            return;
+        }
+
+        // Ensure parameters are up to date
+        RefreshUnlockState();
+
+        // Jump directly to Active
+        currentCharge = maxCharge;
+        SetState(BoostState.Active);
+
+        Debug.Log($"[Boost] DebugForceBoost: Boost activated (duration:{boostDurationSeconds}s)");
+    }
+
     private void EndBoost()
     {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        if (verboseLogs) Debug.Log("[Boost] BOOST ENDED");
-#endif
+        Debug.Log("[Boost] BOOST ENDED — transitioning to Cooldown. Bar will hide.");
         OnBoostEnded?.Invoke();
         SetState(BoostState.Cooldown);
     }

@@ -355,6 +355,11 @@ public class NitroCoin : MonoBehaviour
         magnetTarget = null;
         onMagnetCollectCallback = null;
 
+        // Fade out interactable highlight in sync with vanish animation
+        var highlight = GetComponent<InteractableHighlight>();
+        if (highlight != null)
+            highlight.FadeOut(0.2f);
+
         // Try animated vanish; fallback to instant destroy
         TapVanishAnimator vanish = GetComponent<TapVanishAnimator>();
         if (vanish != null && !vanish.IsPlaying)

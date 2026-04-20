@@ -15,7 +15,7 @@ MonoBehaviour:
   tierIndex: 5
   tierDisplayName: BLACKLIST #5
   carName: JMP-NARDO
-  carImage: {fileID: 0}
+  carImage: {fileID: 21300000, guid: 851685f52283b71458afef29c5f80713, type: 3}
   rewardCar: {fileID: 11400000, guid: b71a7b5dd20ef3349a4face14ad28ce8, type: 2}
   missions:
   - missionType: 0

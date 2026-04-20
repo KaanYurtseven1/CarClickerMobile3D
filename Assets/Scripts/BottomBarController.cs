@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UI;
 
 public class BottomBarController : MonoBehaviour
 {
@@ -7,7 +8,12 @@ public class BottomBarController : MonoBehaviour
     public BottomBarTabUI[] tabs;
     public int defaultTabIndex = 2; // örn: Clicker tab'i başlangıç
 
+    [Header("Ranking Tab Lock")]
+    [Tooltip("Index of the Ranking tab in the tabs array (default 4).")]
+    [SerializeField] private int rankingTabIndex = 4;
+
     private int currentIndex = -1;
+    private Button _rankingButton;
 
     private void Awake()
     {
@@ -17,18 +23,57 @@ public class BottomBarController : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (RankingService.Instance != null)
+            RankingService.Instance.OnPlayerRanked -= OnPlayerBecameRanked;
+
         if (Instance == this) Instance = null;
     }
 
     private void Start()
     {
+        // Cache the Ranking tab button
+        if (tabs != null && rankingTabIndex >= 0 && rankingTabIndex < tabs.Length && tabs[rankingTabIndex] != null)
+            _rankingButton = tabs[rankingTabIndex].GetComponent<Button>();
+
+        // Set initial ranking tab state based on current rank
+        UpdateRankingTabInteractable();
+
+        // Listen for the player becoming ranked
+        if (RankingService.Instance != null)
+            RankingService.Instance.OnPlayerRanked += OnPlayerBecameRanked;
+
         SetActiveTab(defaultTabIndex);
+    }
+
+    private void UpdateRankingTabInteractable()
+    {
+        if (_rankingButton == null) return;
+
+        bool isRanked = RankingService.Instance != null && RankingService.Instance.PlayerRank > 0;
+        _rankingButton.interactable = isRanked;
+    }
+
+    private void OnPlayerBecameRanked()
+    {
+        if (_rankingButton != null)
+            _rankingButton.interactable = true;
     }
 
     public void SetActiveTab(int index)
     {
         if (tabs == null || tabs.Length == 0) return;
         if (index < 0 || index >= tabs.Length) return;
+
+        // Block switching to the ranking tab if unranked
+        if (index == rankingTabIndex)
+        {
+            bool isRanked = RankingService.Instance != null && RankingService.Instance.PlayerRank > 0;
+            if (!isRanked)
+            {
+                Debug.Log("[BottomBar] Ranking tab blocked — player is not yet ranked.");
+                return;
+            }
+        }
 
         currentIndex = index;
 
@@ -52,7 +97,4 @@ public class BottomBarController : MonoBehaviour
 
         SetActiveTab(index);
     }
-
-
-
 }

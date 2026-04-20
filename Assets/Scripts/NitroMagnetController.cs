@@ -147,6 +147,13 @@ public class NitroMagnetController : MonoBehaviour
     private const string SaveKey_CooldownEnd = "Save_NitroMagnet_CooldownEnd";
     private const string SaveKey_CooldownActive = "Save_NitroMagnet_CooldownActive";
 
+    // ── Chase Suspend State ──
+    private bool _suspendedForChase;
+    private int _suspendedQuota;
+    private int _suspendedCollected;
+    private float _suspendedRemainingTime;
+    private bool _suspendedRainOverlapped;
+
     // ── VFX Fade State ──
     private Vector3 _shieldOriginalScale;
     private bool _shieldScaleCached;
@@ -260,11 +267,112 @@ public class NitroMagnetController : MonoBehaviour
             }
 
             Debug.Log($"[NitroMagnet] Rebound to {activeCar.name}: anchor={anchor.name}, shield={shieldVFX?.name}, area={areaCollider?.name}");
+
+            // ── DIAGNOSTIC: runtime object identity & transform chain ──
+            LogShieldDiagnostics("RefreshCarReferences", activeCar);
         }
         else
         {
             Debug.LogWarning($"[NitroMagnet] MagnetAnchor not found under {activeCar.name}");
         }
+    }
+
+    /// <summary>
+    /// TEMPORARY DIAGNOSTIC — prints full runtime identity & transform chain
+    /// for the shield VFX. Remove after debugging.
+    /// </summary>
+    private void LogShieldDiagnostics(string caller, Transform activeCar)
+    {
+        Debug.Log($"[ShieldDiag][{caller}] ════════════════════════════════════════");
+        Debug.Log($"[ShieldDiag] activeCar.name          = {(activeCar != null ? activeCar.name : "NULL")}");
+        Debug.Log($"[ShieldDiag] activeCar.instanceID     = {(activeCar != null ? activeCar.GetInstanceID().ToString() : "N/A")}");
+        Debug.Log($"[ShieldDiag] activeCar.localPos       = {(activeCar != null ? activeCar.localPosition.ToString("F4") : "N/A")}");
+        Debug.Log($"[ShieldDiag] activeCar.worldPos       = {(activeCar != null ? activeCar.position.ToString("F4") : "N/A")}");
+        Debug.Log($"[ShieldDiag] activeCar.localScale     = {(activeCar != null ? activeCar.localScale.ToString("F4") : "N/A")}");
+        Debug.Log($"[ShieldDiag] activeCar.parent         = {(activeCar != null && activeCar.parent != null ? activeCar.parent.name : "NULL")}");
+
+        if (magnetTarget != null)
+        {
+            Debug.Log($"[ShieldDiag] magnetTarget.name        = {magnetTarget.name}");
+            Debug.Log($"[ShieldDiag] magnetTarget.instanceID   = {magnetTarget.GetInstanceID()}");
+            Debug.Log($"[ShieldDiag] magnetTarget.localPos     = {magnetTarget.localPosition.ToString("F4")}");
+            Debug.Log($"[ShieldDiag] magnetTarget.worldPos     = {magnetTarget.position.ToString("F4")}");
+            Debug.Log($"[ShieldDiag] magnetTarget.localScale   = {magnetTarget.localScale.ToString("F4")}");
+            Debug.Log($"[ShieldDiag] magnetTarget.parent       = {(magnetTarget.parent != null ? magnetTarget.parent.name : "NULL")}");
+            Debug.Log($"[ShieldDiag] magnetTarget.fullPath     = {GetFullPath(magnetTarget)}");
+
+            // Check for duplicate MagnetAnchors under activeCar
+            int anchorCount = 0;
+            foreach (Transform child in activeCar)
+                if (child.name.StartsWith("MagnetAnchor")) anchorCount++;
+            Debug.Log($"[ShieldDiag] MagnetAnchor count under {activeCar.name} = {anchorCount}");
+        }
+        else
+        {
+            Debug.LogWarning($"[ShieldDiag] magnetTarget is NULL");
+        }
+
+        if (shieldVFX != null)
+        {
+            Transform st = shieldVFX.transform;
+            Debug.Log($"[ShieldDiag] shieldVFX.name           = {shieldVFX.name}");
+            Debug.Log($"[ShieldDiag] shieldVFX.instanceID      = {shieldVFX.GetInstanceID()}");
+            Debug.Log($"[ShieldDiag] shieldVFX.activeSelf      = {shieldVFX.activeSelf}");
+            Debug.Log($"[ShieldDiag] shieldVFX.localPos        = {st.localPosition.ToString("F4")}");
+            Debug.Log($"[ShieldDiag] shieldVFX.worldPos        = {st.position.ToString("F4")}");
+            Debug.Log($"[ShieldDiag] shieldVFX.localScale      = {st.localScale.ToString("F4")}");
+            Debug.Log($"[ShieldDiag] shieldVFX.lossyScale      = {st.lossyScale.ToString("F4")}");
+            Debug.Log($"[ShieldDiag] shieldVFX.localRot        = {st.localRotation.eulerAngles.ToString("F2")}");
+            Debug.Log($"[ShieldDiag] shieldVFX.parent          = {(st.parent != null ? st.parent.name : "NULL")}");
+            Debug.Log($"[ShieldDiag] shieldVFX.fullPath        = {GetFullPath(st)}");
+            Debug.Log($"[ShieldDiag] shieldVFX.childCount      = {st.childCount}");
+
+            // Check for duplicate Plasma Spheres under magnetTarget
+            if (magnetTarget != null)
+            {
+                int shieldCount = 0;
+                foreach (Transform child in magnetTarget)
+                    if (child.name.StartsWith("Plasma Sphere")) shieldCount++;
+                Debug.Log($"[ShieldDiag] Plasma Sphere count under {magnetTarget.name} = {shieldCount}");
+            }
+
+            // MeshFilter check
+            var mf = shieldVFX.GetComponent<MeshFilter>();
+            Debug.Log($"[ShieldDiag] shieldVFX mesh             = {(mf != null && mf.sharedMesh != null ? mf.sharedMesh.name : "NONE")}");
+            var mr = shieldVFX.GetComponent<MeshRenderer>();
+            Debug.Log($"[ShieldDiag] shieldVFX material          = {(mr != null && mr.sharedMaterial != null ? mr.sharedMaterial.name : "NONE")}");
+
+            // Print full parent chain with world positions
+            Debug.Log($"[ShieldDiag] ── Parent chain (child → root) ──");
+            Transform current = st;
+            int depth = 0;
+            while (current != null && depth < 10)
+            {
+                Debug.Log($"[ShieldDiag]   [{depth}] {current.name} | localPos={current.localPosition.ToString("F4")} worldPos={current.position.ToString("F4")} localScale={current.localScale.ToString("F4")}");
+                current = current.parent;
+                depth++;
+            }
+        }
+        else
+        {
+            Debug.LogWarning($"[ShieldDiag] shieldVFX is NULL");
+        }
+
+        Debug.Log($"[ShieldDiag] _shieldScaleCached        = {_shieldScaleCached}");
+        Debug.Log($"[ShieldDiag] _shieldOriginalScale       = {_shieldOriginalScale.ToString("F4")}");
+        Debug.Log($"[ShieldDiag] ════════════════════════════════════════");
+    }
+
+    private static string GetFullPath(Transform t)
+    {
+        string path = t.name;
+        Transform p = t.parent;
+        while (p != null)
+        {
+            path = p.name + "/" + path;
+            p = p.parent;
+        }
+        return path;
     }
 
     /// <summary>Finds a direct child whose name starts with the given prefix.</summary>
@@ -567,6 +675,9 @@ public class NitroMagnetController : MonoBehaviour
             shieldVFX.transform.localScale = Vector3.zero;
             shieldVFX.SetActive(true);
             _vfxVisible = false;
+
+            // ── DIAGNOSTIC ──
+            Debug.Log($"[ShieldDiag][ArmMagnet] cachedScale={_shieldOriginalScale.ToString("F4")} | shieldVFX.localPos={shieldVFX.transform.localPosition.ToString("F4")} worldPos={shieldVFX.transform.position.ToString("F4")} | mesh={(shieldVFX.GetComponent<MeshFilter>()?.sharedMesh?.name ?? "NONE")} | mat={(shieldVFX.GetComponent<MeshRenderer>()?.sharedMaterial?.name ?? "NONE")}");
         }
 
         if (enableDebugLogs)
@@ -633,6 +744,96 @@ public class NitroMagnetController : MonoBehaviour
     public void ForceDisarm()
     {
         DisarmMagnet("manual");
+    }
+
+    // ══════════════════════════════════════════════
+    //  POLICE CHASE SUSPEND / RESUME
+    // ══════════════════════════════════════════════
+
+    /// <summary>
+    /// Suspends the Nitro Magnet for the duration of a police chase.
+    /// Saves session progress, fades out VFX, stops monitors, clears isArmed
+    /// WITHOUT triggering cooldown.
+    /// </summary>
+    public void SuspendForChase()
+    {
+        if (_suspendedForChase) return;
+
+        if (!isArmed)
+        {
+            Debug.Log("[NitroMagnet] SuspendForChase: not armed, nothing to suspend");
+            return;
+        }
+
+        // Save session progress
+        _suspendedQuota = quota;
+        _suspendedCollected = coinsCollected;
+        _suspendedRainOverlapped = _rainOverlappedThisSession;
+        float elapsed = Time.time - armTime;
+        _suspendedRemainingTime = Mathf.Max(0f, maxArmedDuration - elapsed);
+
+        // Cancel in-flight coins cleanly
+        CancelAllInFlightCoins("chase_suspend");
+
+        // Fade out VFX (plays close animation)
+        if (_vfxVisible)
+            FadeOutVFX();
+
+        // Stop monitors
+        StopVFXMonitor();
+        StopBoundsCheck();
+
+        // Clear armed state — no cooldown, no SFX, no save
+        isArmed = false;
+        inFlightCoins.Clear();
+        trackedCoins.Clear();
+
+        _suspendedForChase = true;
+        Debug.Log($"[NitroMagnet] SuspendForChase: suspended (quota={_suspendedQuota}, collected={_suspendedCollected}, remaining={_suspendedRemainingTime:F1}s)");
+    }
+
+    /// <summary>
+    /// Resumes the Nitro Magnet after a police chase ends.
+    /// Re-arms with saved session state so the player doesn't lose progress.
+    /// </summary>
+    public void ResumeAfterChase()
+    {
+        if (!_suspendedForChase)
+        {
+            Debug.Log("[NitroMagnet] ResumeAfterChase: was not suspended, skipping");
+            return;
+        }
+
+        _suspendedForChase = false;
+
+        // If no remaining time or quota already met, just start cooldown
+        if (_suspendedRemainingTime <= 0f || _suspendedCollected >= _suspendedQuota)
+        {
+            Debug.Log("[NitroMagnet] ResumeAfterChase: no time left or quota met, starting cooldown");
+            StartCooldown();
+            return;
+        }
+
+        // Re-arm with restored state
+        isArmed = true;
+        quota = _suspendedQuota;
+        coinsCollected = _suspendedCollected;
+        _rainOverlappedThisSession = _suspendedRainOverlapped;
+        armTime = Time.time - (maxArmedDuration - _suspendedRemainingTime);
+
+        if (shieldVFX != null)
+        {
+            CacheShieldScale();
+            shieldVFX.transform.localScale = Vector3.zero;
+            shieldVFX.SetActive(true);
+            _vfxVisible = false;
+        }
+
+        // Restart monitors
+        StartBoundsCheck();
+        StartVFXMonitor();
+
+        Debug.Log($"[NitroMagnet] ResumeAfterChase: re-armed (quota={quota}, collected={coinsCollected}, remaining={_suspendedRemainingTime:F1}s)");
     }
 
     /// <summary>
@@ -1067,13 +1268,20 @@ public class NitroMagnetController : MonoBehaviour
 
         CacheShieldScale();
         shieldVFX.SetActive(true);
+
+        bool chaseActive = PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive;
+        Debug.Log($"[MagnetVFXDebug] FadeInVFX: chaseActive={chaseActive} shieldVFX.localPos={shieldVFX.transform.localPosition.ToString("F4")} worldPos={shieldVFX.transform.position.ToString("F4")} parent={shieldVFX.transform.parent?.name ?? "NULL"} targetScale={_shieldOriginalScale.ToString("F4")}");
+
         _vfxFadeTween = shieldVFX.transform
             .DOScale(_shieldOriginalScale, vfxFadeInDuration)
             .SetEase(Ease.OutBack)
             .SetUpdate(true);
 
         if (enableDebugLogs)
+        {
             Debug.Log("[NitroMagnetVFX] Fade-IN started");
+            Debug.Log($"[ShieldDiag][FadeInVFX] DOScale target={_shieldOriginalScale.ToString("F4")} | currentScale={shieldVFX.transform.localScale.ToString("F4")} | localPos={shieldVFX.transform.localPosition.ToString("F4")} | worldPos={shieldVFX.transform.position.ToString("F4")} | fullPath={GetFullPath(shieldVFX.transform)}");
+        }
     }
 
     private void FadeOutVFX()
@@ -1081,6 +1289,9 @@ public class NitroMagnetController : MonoBehaviour
         if (shieldVFX == null || !_vfxVisible) return;
         _vfxVisible = false;
         KillVFXTween();
+
+        bool chaseActive = PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive;
+        Debug.Log($"[MagnetVFXDebug] FadeOutVFX: chaseActive={chaseActive} shieldVFX.localPos={shieldVFX.transform.localPosition.ToString("F4")} worldPos={shieldVFX.transform.position.ToString("F4")} scale={shieldVFX.transform.localScale.ToString("F4")}");
 
         _vfxFadeTween = shieldVFX.transform
             .DOScale(Vector3.zero, vfxFadeOutDuration)

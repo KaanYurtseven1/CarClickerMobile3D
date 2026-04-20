@@ -94,6 +94,11 @@ public class Radar : MonoBehaviour
             }
         }
 
+        // Fade out interactable highlight in sync with vanish animation
+        var highlight = GetComponent<InteractableHighlight>();
+        if (highlight != null)
+            highlight.FadeOut(0.25f);
+
         // Try animated vanish (with shake); fallback to instant destroy
         TapVanishAnimator vanish = GetComponent<TapVanishAnimator>();
         if (vanish != null && !vanish.IsPlaying)

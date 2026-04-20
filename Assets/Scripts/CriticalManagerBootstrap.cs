@@ -28,6 +28,7 @@ public static class CriticalManagerBootstrap
     {
         EnsureManager<ChestInventoryManager>("ChestInventoryManager");
         EnsureManager<ChestSessionManager>("ChestSessionManager");
+        EnsureManager<RankingService>("RankingService");
         Debug.Log("[Bootstrap] Critical manager bootstrap complete.");
     }
 

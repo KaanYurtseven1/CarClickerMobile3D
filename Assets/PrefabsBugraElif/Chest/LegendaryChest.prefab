@@ -107,5 +107,34 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 3751765518473777022, guid: c1b73c8156f94d5439b212be54be40b7, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 9083362847845820847}
   m_SourcePrefab: {fileID: 100100000, guid: c1b73c8156f94d5439b212be54be40b7, type: 3}
+--- !u!1 &2398063076181889729 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 3751765518473777022, guid: c1b73c8156f94d5439b212be54be40b7, type: 3}
+  m_PrefabInstance: {fileID: 1537789559981284799}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &9083362847845820847
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2398063076181889729}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c38889e992a05ce49b486c4bb55ad376, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractableHighlight
+  glowMaterial: {fileID: 2100000, guid: 0e402c26ee962d049abeacbc70ab6291, type: 2}
+  glowColor: {r: 5.656854, g: 2.2627418, b: 1.1313709, a: 1}
+  glowSize: 3
+  yOffset: 0.02
+  groundHalo: 1
+  enablePulse: 1
+  pulseAmplitude: 0.14
+  pulseFrequency: 1.2
+  fadeInDuration: 0.35

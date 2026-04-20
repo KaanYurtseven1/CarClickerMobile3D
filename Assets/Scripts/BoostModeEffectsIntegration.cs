@@ -39,6 +39,8 @@ public class BoostModeEffectsIntegration : MonoBehaviour
     private GameObject _carObject;
     private GameObject _boostFXLeft;
     private GameObject _boostFXRight;
+    private BoostVFXFader _faderLeft;
+    private BoostVFXFader _faderRight;
 
     // Warning flags to prevent log spam
     private bool _warnedMissingCar = false;
@@ -220,6 +222,8 @@ public class BoostModeEffectsIntegration : MonoBehaviour
 
         _boostFXLeft = leftVFX != null ? leftVFX.gameObject : null;
         _boostFXRight = rightVFX != null ? rightVFX.gameObject : null;
+        _faderLeft = _boostFXLeft != null ? _boostFXLeft.GetComponent<BoostVFXFader>() : null;
+        _faderRight = _boostFXRight != null ? _boostFXRight.GetComponent<BoostVFXFader>() : null;
 
         if (_boostFXLeft == null || _boostFXRight == null)
         {
@@ -335,28 +339,51 @@ public class BoostModeEffectsIntegration : MonoBehaviour
 
     // ==================== VFX CONTROL ====================
 
+    /// <summary>
+    /// Smooth fade-in / fade-out via BoostVFXFader.
+    /// Falls back to hard SetActive when no fader component is found.
+    /// </summary>
     private void SetVFXActive(bool active)
     {
-        // Re-cache if car reference was lost (e.g., car respawned)
         if (_carObject == null)
-        {
             CacheCarAndVFX();
-        }
 
-        if (_boostFXLeft != null)
+        if (active)
         {
-            _boostFXLeft.SetActive(active);
-        }
+            if (_faderLeft != null) _faderLeft.FadeIn();
+            else if (_boostFXLeft != null) _boostFXLeft.SetActive(true);
 
-        if (_boostFXRight != null)
+            if (_faderRight != null) _faderRight.FadeIn();
+            else if (_boostFXRight != null) _boostFXRight.SetActive(true);
+        }
+        else
         {
-            _boostFXRight.SetActive(active);
+            if (_faderLeft != null) _faderLeft.FadeOut();
+            else if (_boostFXLeft != null) _boostFXLeft.SetActive(false);
+
+            if (_faderRight != null) _faderRight.FadeOut();
+            else if (_boostFXRight != null) _boostFXRight.SetActive(false);
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         if (verboseLogs && (_boostFXLeft != null || _boostFXRight != null))
-            Debug.Log($"[BoostIntegration] VFX SetActive({active})");
+            Debug.Log($"[BoostIntegration] VFX {(active ? "FadeIn" : "FadeOut")}()");
 #endif
+    }
+
+    /// <summary>
+    /// Instant VFX on/off without animation — used for state recovery and car switching.
+    /// </summary>
+    private void SetVFXImmediate(bool active)
+    {
+        if (_carObject == null)
+            CacheCarAndVFX();
+
+        if (_faderLeft != null) _faderLeft.SetImmediate(active);
+        else if (_boostFXLeft != null) _boostFXLeft.SetActive(active);
+
+        if (_faderRight != null) _faderRight.SetImmediate(active);
+        else if (_boostFXRight != null) _boostFXRight.SetActive(active);
     }
 
     // ==================== ECONOMY MULTIPLIER ====================
@@ -414,7 +441,7 @@ public class BoostModeEffectsIntegration : MonoBehaviour
 #endif
 
             _boostCurrentlyActive = true;
-            SetVFXActive(true);
+            SetVFXImmediate(true);
             ApplyEconomyMultiplier(actualMultiplier);
             ApplyRoadSpeedMultiplier(roadSpeedMultiplier);
         }
@@ -422,7 +449,7 @@ public class BoostModeEffectsIntegration : MonoBehaviour
         {
             // Boost ended while we were away
             _boostCurrentlyActive = false;
-            SetVFXActive(false);
+            SetVFXImmediate(false);
             ApplyEconomyMultiplier(1f);
             ApplyRoadSpeedMultiplier(1f);
         }
@@ -439,10 +466,10 @@ public class BoostModeEffectsIntegration : MonoBehaviour
         _warnedMissingVFX = false;
         CacheCarAndVFX(activeCar);
 
-        // If boost is active, ensure VFX is on for the new car
+        // If boost is active, ensure VFX is on for the new car (instant, no fade)
         if (_boostCurrentlyActive)
         {
-            SetVFXActive(true);
+            SetVFXImmediate(true);
         }
     }
 }

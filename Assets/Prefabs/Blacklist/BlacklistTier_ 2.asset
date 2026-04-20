@@ -15,7 +15,7 @@ MonoBehaviour:
   tierIndex: 4
   tierDisplayName: BLACKLIST #4
   carName: JMP-DODGE
-  carImage: {fileID: 0}
+  carImage: {fileID: 21300000, guid: e40870bab711eff4ea5f823679dee45b, type: 3}
   rewardCar: {fileID: 11400000, guid: cbe9d106a9262e14f9e49c1e7f54798f, type: 2}
   missions:
   - missionType: 0

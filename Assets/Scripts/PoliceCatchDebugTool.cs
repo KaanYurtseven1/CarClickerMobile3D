@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 
 /// <summary>
 /// Debug utility for manually triggering a police chase from the Inspector.
@@ -7,6 +8,9 @@ using UnityEngine;
 /// </summary>
 public class PoliceCatchDebugTool : MonoBehaviour
 {
+    [Tooltip("Delay before chase starts (seconds). During this delay, Nitro Magnet shutdown runs so you can visually verify it.")]
+    [SerializeField] private float debugDelay = 1.5f;
+
     public void TriggerChase()
     {
         if (!Application.isPlaying)
@@ -26,6 +30,18 @@ public class PoliceCatchDebugTool : MonoBehaviour
             Debug.LogWarning("[PoliceCatchDebug] A chase is already in progress.");
             return;
         }
+
+        StartCoroutine(DelayedChase());
+    }
+
+    private IEnumerator DelayedChase()
+    {
+        // Suspend Nitro Magnet immediately so VFX close is visible during the delay
+        if (NitroMagnetController.Instance != null)
+            NitroMagnetController.Instance.SuspendForChase();
+
+        Debug.Log($"[PoliceCatchDebug] Nitro Magnet suspended. Waiting {debugDelay}s before starting chase...");
+        yield return new WaitForSeconds(debugDelay);
 
         Debug.Log("[PoliceCatchDebug] Starting police chase...");
         PoliceCatchController.Instance.StartChase();

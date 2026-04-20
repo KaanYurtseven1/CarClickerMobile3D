@@ -64,6 +64,9 @@ public class BlacklistManager : MonoBehaviour
 
     private void OnGameLoaded()
     {
+        int previousTier = _save.currentTierIndex;
+        bool wasCampaignComplete = _save.campaignComplete;
+
         _save = BlacklistSaveData.LoadFromPrefs();
         RefreshActiveTier();
 
@@ -71,7 +74,14 @@ public class BlacklistManager : MonoBehaviour
         if (BlacklistStatTracker.Instance != null)
             BlacklistStatTracker.Instance.LateSubscribe();
 
-        OnTierChanged?.Invoke();
+        // Only fire OnTierChanged if the tier actually changed — prevents false
+        // force-submits in RankingService on every scene return.
+        if (_save.currentTierIndex != previousTier || _save.campaignComplete != wasCampaignComplete)
+        {
+            Debug.Log($"[BlacklistManager] Tier changed during load: {previousTier} → {_save.currentTierIndex} (campaign={_save.campaignComplete})");
+            OnTierChanged?.Invoke();
+        }
+
         OnProgressChanged?.Invoke();
     }
 

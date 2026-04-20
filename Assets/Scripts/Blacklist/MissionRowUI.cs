@@ -175,6 +175,7 @@ public class MissionRowUI : MonoBehaviour
     private void SetVisualState(bool isComplete)
     {
         if (barBG != null) barBG.SetActive(!isComplete);
+        if (barFill != null) barFill.gameObject.SetActive(!isComplete);
         if (progressText != null) progressText.gameObject.SetActive(!isComplete);
         if (barBGComplete != null) barBGComplete.SetActive(isComplete);
         if (completedBtn != null) completedBtn.SetActive(isComplete);

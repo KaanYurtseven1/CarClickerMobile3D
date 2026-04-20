@@ -12,6 +12,7 @@ GameObject:
   - component: {fileID: 822593109925160732}
   - component: {fileID: 3753324941675197754}
   - component: {fileID: 1850730412237297339}
+  - component: {fileID: 4054771325180154803}
   m_Layer: 7
   m_Name: Radar_Test
   m_TagString: Radar
@@ -93,6 +94,27 @@ MonoBehaviour:
   shakeDuration: 0.25
   shakeStrength: 0.1
   shakeVibrato: 10
+--- !u!114 &4054771325180154803
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5406948969256351087}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c38889e992a05ce49b486c4bb55ad376, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractableHighlight
+  glowMaterial: {fileID: 2100000, guid: 0e402c26ee962d049abeacbc70ab6291, type: 2}
+  glowColor: {r: 3.482202, g: 0.92858726, b: 0.46429363, a: 1}
+  glowSize: 1.8
+  yOffset: 0.2
+  groundHalo: 1
+  enablePulse: 1
+  pulseAmplitude: 0.15
+  pulseFrequency: 1.5
+  fadeInDuration: 0.3
 --- !u!1001 &5291031204246207600
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -115,19 +137,19 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 02103c66573b68e49a6a40bfff1910de, type: 3}
       propertyPath: m_LocalRotation.w
-      value: 0.7071068
+      value: -0.27059793
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 02103c66573b68e49a6a40bfff1910de, type: 3}
       propertyPath: m_LocalRotation.x
-      value: -0.7071068
+      value: 0.27059793
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 02103c66573b68e49a6a40bfff1910de, type: 3}
       propertyPath: m_LocalRotation.y
-      value: 0
+      value: 0.65328157
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 02103c66573b68e49a6a40bfff1910de, type: 3}
       propertyPath: m_LocalRotation.z
-      value: 0
+      value: 0.65328157
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 02103c66573b68e49a6a40bfff1910de, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
@@ -135,7 +157,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 02103c66573b68e49a6a40bfff1910de, type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
+      value: 225
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 02103c66573b68e49a6a40bfff1910de, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z

@@ -332,6 +332,72 @@ public class BoostModeCinematicController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Kills the car shake/rotation tweens and resets the car model
+    /// to its original local transform. Called by PoliceCatchController
+    /// before the chase slide so the shake doesn't desync child objects.
+    /// </summary>
+    public void SuspendCarShake()
+    {
+        Debug.Log($"[BoostCinematicDebug] SuspendCarShake CALLED: _carTransform={(_carTransform != null ? _carTransform.name : "NULL")} shakeActive={(_carShakePosTween != null && _carShakePosTween.IsActive())} _originalCarLocalPos={_originalCarLocalPos}");
+        if (_carTransform != null)
+            Debug.Log($"[BoostCinematicDebug] SuspendCarShake: BEFORE restore — carModel.local={_carTransform.localPosition}");
+
+        if (_carShakePosTween != null && _carShakePosTween.IsActive())
+        {
+            _carShakePosTween.Kill();
+            _carShakePosTween = null;
+        }
+        if (_carShakeRotTween != null && _carShakeRotTween.IsActive())
+        {
+            _carShakeRotTween.Kill();
+            _carShakeRotTween = null;
+        }
+
+        // Reset to pre-shake state
+        if (_carTransform != null)
+        {
+            _carTransform.localPosition = _originalCarLocalPos;
+            _carTransform.localRotation = _originalCarLocalRot;
+            Debug.Log($"[BoostCinematicDebug] SuspendCarShake: AFTER restore — carModel.local={_carTransform.localPosition} (restored to {_originalCarLocalPos})");
+        }
+    }
+
+    /// <summary>
+    /// Restarts car shake if a boost is still active. Called by
+    /// PoliceCatchController after the chase ends.
+    /// </summary>
+    public void ResumeCarShakeIfActive()
+    {
+        if (!_boostActive || !_cinematicActive || _carTransform == null) return;
+
+        // Refresh cached original in case the car moved (e.g., chase reset)
+        _originalCarLocalPos = _carTransform.localPosition;
+        _originalCarLocalRot = _carTransform.localRotation;
+
+        // Use a safe fallback duration for the remaining shake
+        float remaining = Mathf.Max(_currentBoostDuration, 5f);
+
+        int loops = Mathf.CeilToInt(remaining / ShakeLoopDuration);
+
+        _carShakePosTween = _carTransform.DOShakePosition(
+            duration: ShakeLoopDuration,
+            strength: new Vector3(shakePositionStrength, shakePositionStrength * 0.5f, shakePositionStrength * 0.3f),
+            vibrato: shakeVibrato,
+            randomness: shakeRandomness,
+            snapping: false,
+            fadeOut: false
+        ).SetLoops(loops, LoopType.Restart).SetUpdate(true);
+
+        _carShakeRotTween = _carTransform.DOShakeRotation(
+            duration: ShakeLoopDuration,
+            strength: new Vector3(shakeRotationStrength * 0.3f, shakeRotationStrength * 0.2f, shakeRotationStrength),
+            vibrato: shakeVibrato,
+            randomness: shakeRandomness * 0.7f,
+            fadeOut: false
+        ).SetLoops(loops, LoopType.Restart).SetUpdate(true);
+    }
+
     // ==================== STATE RECOVERY ====================
 
     private void CheckAndApplyActiveBoost()
@@ -538,6 +604,12 @@ public class BoostModeCinematicController : MonoBehaviour
 
     private void EndCinematicSequence()
     {
+        // ── DEBUG: Detect if this fires during police chase ──
+        bool chaseActive = PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive;
+        Debug.Log($"[BoostCinematicDebug] EndCinematicSequence CALLED! chaseActive={chaseActive} _boostActive={_boostActive} _cinematicActive={_cinematicActive}");
+        if (chaseActive)
+            Debug.LogWarning("[BoostCinematicDebug] ⚠ EndCinematicSequence firing DURING POLICE CHASE! This will create DOLocalMove on car model!");
+
         // Kill active shake and in-sequence tweens
         KillInProgressTweens();
 
@@ -573,7 +645,9 @@ public class BoostModeCinematicController : MonoBehaviour
         }
 
         // === CAR RETURN TO ORIGINAL ===
-        if (_carTransform != null)
+        // Skip car DOLocalMove when police chase is active — the chase
+        // controls CarRoot position and the car model must stay stable.
+        if (_carTransform != null && !chaseActive)
         {
             // Smoothly return car to original position/rotation
             _carResetPosTween = _carTransform.DOLocalMove(_originalCarLocalPos, cameraOutTime * 0.6f)
@@ -583,6 +657,10 @@ public class BoostModeCinematicController : MonoBehaviour
             _carResetRotTween = _carTransform.DOLocalRotateQuaternion(_originalCarLocalRot, cameraOutTime * 0.6f)
                 .SetEase(Ease.OutQuad)
                 .SetUpdate(true);
+        }
+        else if (_carTransform != null && chaseActive)
+        {
+            Debug.Log($"[BoostCinematicDebug] EndCinematicSequence: SKIPPED car DOLocalMove — chase is active");
         }
     }
 

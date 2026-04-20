@@ -15,7 +15,7 @@ MonoBehaviour:
   tierIndex: 6
   tierDisplayName: BLACKLIST #6
   carName: JMP-VW
-  carImage: {fileID: 0}
+  carImage: {fileID: 21300000, guid: c31a6d865f6bf0a4b921764662e18d14, type: 3}
   rewardCar: {fileID: 11400000, guid: 23f7ed154220b9d4f8af250504751732, type: 2}
   missions:
   - missionType: 0

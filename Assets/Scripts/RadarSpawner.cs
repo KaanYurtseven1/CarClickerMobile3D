@@ -102,6 +102,16 @@ public class RadarSpawner : MonoBehaviour
         }
 
         GameObject obj = Instantiate(radarPrefab, chosen.position, chosen.rotation);
+
+        // Adjust SM_Radar child Y rotation based on spawn side
+        Transform smRadar = obj.transform.Find("SM_Radar");
+        if (smRadar != null)
+        {
+            Vector3 euler = smRadar.localEulerAngles;
+            euler.y = side == RadarSide.Left ? 135f : 225f;
+            smRadar.localEulerAngles = euler;
+        }
+
         Radar radar = obj.GetComponent<Radar>();
         if (radar != null)
             radar.Init(side);

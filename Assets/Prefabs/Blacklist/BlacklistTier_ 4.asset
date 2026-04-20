@@ -15,7 +15,7 @@ MonoBehaviour:
   tierIndex: 2
   tierDisplayName: BLACKLIST #2
   carName: JMP-PAGANI
-  carImage: {fileID: 0}
+  carImage: {fileID: 21300000, guid: 3bc40476d2bd65347b8e9556f8fa43f8, type: 3}
   rewardCar: {fileID: 11400000, guid: 14e7bea1932568540b408422a7b5f921, type: 2}
   missions:
   - missionType: 0

@@ -15,7 +15,7 @@ MonoBehaviour:
   tierIndex: 3
   tierDisplayName: BLACKLIST #3
   carName: JMP-BMW
-  carImage: {fileID: 0}
+  carImage: {fileID: 21300000, guid: dfa0a08813e85dc40b5216cea3e8b7f7, type: 3}
   rewardCar: {fileID: 11400000, guid: edb4b5faa0b2dff469b6e4c810148615, type: 2}
   missions:
   - missionType: 0

@@ -64,6 +64,10 @@ public class PoliceCatchController : MonoBehaviour
     [Header("Chase Z Settings")]
     [Tooltip("Maximum chase duration (seconds). Surviving = escape.")]
     [SerializeField] private float maxChaseDuration = 12f;
+
+    [Header("Pre-Chase Delay")]
+    [Tooltip("Short buffer before chase actually starts. Gives Nitro Magnet VFX time to close.")]
+    [SerializeField] private float preChaseDelay = 0.5f;
     [Tooltip("Fallback flat police advance speed used only when progressiveDifficultyCurve has no keys.\n" +
              "Normally overridden by the progressive difficulty curve below.")]
     [SerializeField] private float policeBaseAdvancePerSecond = 0.73f;
@@ -310,6 +314,12 @@ public class PoliceCatchController : MonoBehaviour
     private Quaternion _playerCarOriginalRot;
     private Vector3 _policeCarOriginalLocal;
     private Quaternion _policeCarOriginalRot;
+
+    // Car model ("Car"-tagged child) cached transform — used to restore
+    // after killing child tweens so MagnetAnchor stays aligned.
+    private Transform _carModelTransform;
+    private Vector3 _carModelOriginalLocal;
+    private Quaternion _carModelOriginalRot;
 
     // Reference to TapInputRaycaster for chase flag
     private TapInputRaycaster _tapInput;
@@ -583,6 +593,15 @@ public class PoliceCatchController : MonoBehaviour
 
     private IEnumerator ChaseSequence()
     {
+        // ── PRE-CHASE BUFFER ──
+        // Suspend Nitro Magnet immediately, then wait a short grace period
+        // so VFX can visually close before the chase takes over.
+        if (NitroMagnetController.Instance != null)
+            NitroMagnetController.Instance.SuspendForChase();
+
+        if (preChaseDelay > 0f)
+            yield return new WaitForSeconds(preChaseDelay);
+
         // ── ENTER ──
         _state = ChaseState.Enter;
         _chaseTimer = 0f;
@@ -604,8 +623,16 @@ public class PoliceCatchController : MonoBehaviour
             policeCar.gameObject.SetActive(true);
         }
 
+        // Cache car model's local transform BEFORE any tweens are killed,
+        // so we can restore it accurately (no hardcoded zero/identity).
+        Debug.Log($"[PoliceChaseDebug] PRE-CacheCarModel: playerCar.local={playerCar?.localPosition} carModel(tag)={GameObject.FindGameObjectWithTag("Car")?.transform.localPosition}");
+        CacheCarModelTransform();
+        Debug.Log($"[PoliceChaseDebug] POST-CacheCarModel: cached=({_carModelOriginalLocal}) carModelRef={((_carModelTransform != null) ? _carModelTransform.name : "NULL")} actualLocal={_carModelTransform?.localPosition}");
+
         // Animate police drift-in + player car forward slide
+        Debug.Log("[PoliceChaseDebug] >>> AnimateEnter START");
         yield return StartCoroutine(AnimateEnter());
+        Debug.Log($"[PoliceChaseDebug] <<< AnimateEnter END: playerCar.local={playerCar?.localPosition} carModel.local={_carModelTransform?.localPosition}");
 
         // Initialize chase Z from drift-end position
         _policeChaseZ = policeCar != null ? policeCar.localPosition.z : -1f;
@@ -825,6 +852,9 @@ public class PoliceCatchController : MonoBehaviour
         _state = ChaseState.Idle;
         Debug.Log("[PoliceCatch] Chase ended, returning to Idle.");
 
+        // Re-enable car effects suspended during chase (boost shake, etc.)
+        ResumeCarEffectsAfterChase();
+
         // Notify subscribers (e.g. AmbientHeatManager) that this chase has fully ended
         OnChaseEnded?.Invoke();
     }
@@ -833,8 +863,15 @@ public class PoliceCatchController : MonoBehaviour
 
     private IEnumerator AnimateEnter()
     {
+        Debug.Log($"[PoliceChaseDebug] AnimateEnter: BEFORE DOKill — carModel.local={_carModelTransform?.localPosition} isTweening={(_carModelTransform != null ? DG.Tweening.DOTween.IsTweening(_carModelTransform).ToString() : "N/A")}");
         if (playerCar != null) playerCar.DOKill();
         if (policeCar != null) policeCar.DOKill();
+        Debug.Log($"[PoliceChaseDebug] AnimateEnter: AFTER DOKill(playerCar) — carModel.local={_carModelTransform?.localPosition}");
+
+        // Kill DOTween on all car children (boost cinematic shake, VFX tweens, etc.)
+        // so they don't fight the chase slide or desync MagnetAnchor / Plasma Sphere.
+        KillCarChildTweens();
+        Debug.Log($"[PoliceChaseDebug] AnimateEnter: AFTER KillCarChildTweens — carModel.local={_carModelTransform?.localPosition}");
 
         Sequence seq = DOTween.Sequence();
 
@@ -1088,6 +1125,98 @@ public class PoliceCatchController : MonoBehaviour
         }
 
         yield return seq.WaitForCompletion();
+    }
+
+    /// <summary>
+    /// Caches the "Car"-tagged child model's local transform so we can
+    /// restore it precisely after killing child tweens. Must be called
+    /// BEFORE SuspendCarShake / DOKill on children.
+    /// </summary>
+    private void CacheCarModelTransform()
+    {
+        _carModelTransform = null;
+        if (playerCar == null) return;
+
+        GameObject carModel = GameObject.FindGameObjectWithTag("Car");
+        if (carModel != null && carModel.transform.parent == playerCar)
+        {
+            _carModelTransform = carModel.transform;
+            _carModelOriginalLocal = _carModelTransform.localPosition;
+            _carModelOriginalRot = _carModelTransform.localRotation;
+        }
+    }
+
+    /// <summary>
+    /// Kills all DOTween tweens running on descendants of playerCar
+    /// (e.g., BoostModeCinematicController shake on the car model,
+    /// NitroMagnet VFX DOScale on Plasma Sphere, etc.).
+    /// Restores the car model to its cached original local transform
+    /// so MagnetAnchor and Plasma Sphere stay perfectly aligned with CarRoot.
+    /// </summary>
+    private void KillCarChildTweens()
+    {
+        if (playerCar == null) return;
+
+        Debug.Log($"[PoliceChaseDebug] KillCarChildTweens: BEFORE SuspendCarShake — carModel.local={_carModelTransform?.localPosition}");
+
+        // Suspend boost cinematic car shake cleanly (restores its own cached original)
+        if (BoostModeCinematicController.Instance != null)
+            BoostModeCinematicController.Instance.SuspendCarShake();
+
+        Debug.Log($"[PoliceChaseDebug] KillCarChildTweens: AFTER SuspendCarShake — carModel.local={_carModelTransform?.localPosition}");
+
+        // Kill any remaining DOTween on all descendants (covers VFX, scale tweens, etc.)
+        int killedCount = 0;
+        foreach (var t in playerCar.GetComponentsInChildren<Transform>(true))
+        {
+            if (t == playerCar) continue;
+            if (DG.Tweening.DOTween.IsTweening(t))
+            {
+                Debug.Log($"[PoliceChaseDebug] KillCarChildTweens: killing tween on '{t.name}' (path={GetDebugPath(t)})");
+                killedCount++;
+            }
+            t.DOKill();
+        }
+        Debug.Log($"[PoliceChaseDebug] KillCarChildTweens: killed {killedCount} child tweens");
+        Debug.Log($"[PoliceChaseDebug] KillCarChildTweens: AFTER child DOKill — carModel.local={_carModelTransform?.localPosition}");
+
+        // Restore car model to its cached pre-tween local transform
+        if (_carModelTransform != null)
+        {
+            Debug.Log($"[PoliceChaseDebug] KillCarChildTweens: RESTORING carModel from {_carModelTransform.localPosition} to cached {_carModelOriginalLocal}");
+            _carModelTransform.localPosition = _carModelOriginalLocal;
+            _carModelTransform.localRotation = _carModelOriginalRot;
+            Debug.Log($"[PoliceChaseDebug] KillCarChildTweens: AFTER restore — carModel.local={_carModelTransform.localPosition}");
+        }
+
+    }
+
+    private static string GetDebugPath(Transform t)
+    {
+        string path = t.name;
+        Transform p = t.parent;
+        int depth = 0;
+        while (p != null && depth < 8)
+        {
+            path = p.name + "/" + path;
+            p = p.parent;
+            depth++;
+        }
+        return path;
+    }
+
+    /// <summary>
+    /// Re-enables car effects (e.g., boost shake) that were suspended
+    /// when the chase started. Called after the chase fully ends.
+    /// </summary>
+    private void ResumeCarEffectsAfterChase()
+    {
+        if (BoostModeCinematicController.Instance != null)
+            BoostModeCinematicController.Instance.ResumeCarShakeIfActive();
+
+        // Resume Nitro Magnet if it was suspended at chase start
+        if (NitroMagnetController.Instance != null)
+            NitroMagnetController.Instance.ResumeAfterChase();
     }
 
     private void StartSway()

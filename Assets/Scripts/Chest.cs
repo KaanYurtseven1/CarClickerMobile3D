@@ -51,6 +51,11 @@ public class Chest : MonoBehaviour
         if (SFXManager.Instance != null)
             SFXManager.Instance.PlayWorldChestCollect();
 
+        // Fade out interactable highlight in sync with vanish animation
+        var highlight = GetComponent<InteractableHighlight>();
+        if (highlight != null)
+            highlight.FadeOut(0.2f);
+
         TapVanishAnimator vanish = GetComponent<TapVanishAnimator>();
         if (vanish != null && !vanish.IsPlaying)
         {

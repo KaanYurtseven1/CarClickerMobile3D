@@ -15,7 +15,7 @@ MonoBehaviour:
   tierIndex: 1
   tierDisplayName: BLACKLIST #1
   carName: JMP-BUGATTI
-  carImage: {fileID: 0}
+  carImage: {fileID: 21300000, guid: b1afca2bea307b04088f196a64420140, type: 3}
   rewardCar: {fileID: 11400000, guid: fb02849359dcd2b48816ec9becdb8542, type: 2}
   missions:
   - missionType: 0

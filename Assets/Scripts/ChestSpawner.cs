@@ -32,6 +32,10 @@ public class ChestSpawner : MonoBehaviour
     public bool useManualRotation = false;
     public Vector3 manualEulerRotation;
 
+    [Header("Tutorial")]
+    [Tooltip("World Z threshold the tutorial Common Chest must cross (toward the camera) to trigger gameplay freeze. Mirrors NitroCoinSpawner.tutorialFreezeZ.")]
+    public float chestTutorialFreezeZ = 0f;
+
     private bool isSpawning = false;
 
     private void Start()
@@ -64,14 +68,52 @@ public class ChestSpawner : MonoBehaviour
             {
                 yield return null;
                 if (UIFlowState.IsSpawnSuppressed) continue;
+                if (!TutorialGate.ChestUnlocked || TutorialGate.GameplayFrozen) continue;
+                if (TutorialGate.ChestPipelineSuspended) continue;
                 elapsed += Time.deltaTime;
             }
+
+            // Tutorial gating: do not spawn until 3 Nitro Coins are collected.
+            if (!TutorialGate.ChestUnlocked || TutorialGate.GameplayFrozen)
+                continue;
+
+            // Tutorial pipeline suspension (post-first-free-chest Cards segment): block
+            // any new spawns until the player presses Clicker after Step 11/Ten.
+            if (TutorialGate.ChestPipelineSuspended)
+                continue;
 
             // Don't spawn if inventory is full
             if (ChestInventoryManager.Instance != null && ChestInventoryManager.Instance.IsInventoryFull)
             {
                 Debug.Log("[ChestSpawner] Inventory full - skipping spawn.");
                 continue;
+            }
+
+            // Pre-first-free-chest-open guard: while the very first tutorial chest
+            // is still alive in the world OR sitting unopened in inventory, block
+            // any second chest from spawning. Seven points at that one chest slot
+            // and we must not pollute the inventory before the player opens it.
+            if (TutorialGate.TutorialFreeChestOpenedCount == 0
+                && (TutorialGate.TutorialChestActive
+                    || (ChestInventoryManager.Instance != null && ChestInventoryManager.Instance.ChestCount > 0)))
+            {
+                continue;
+            }
+
+            // Tutorial/free Common Chest pipeline gate:
+            // While the player has not yet opened all 3 free Common Chests,
+            // we never want more than (Quota - openedCount) tutorial-free chests
+            // simultaneously in inventory. If the pipeline is already saturated,
+            // pause spawning until one of those free chests is opened.
+            if (TutorialGate.TutorialFreeChestOpenedCount < TutorialGate.TutorialFreeChestQuota
+                && ChestInventoryManager.Instance != null)
+            {
+                int unopenedFree = ChestInventoryManager.Instance.CountTutorialFreeUnopenedChests();
+                if (TutorialGate.TutorialFreeChestOpenedCount + unopenedFree >= TutorialGate.TutorialFreeChestQuota)
+                {
+                    // Pipeline full — wait for the player to open the free chests already in inventory.
+                    continue;
+                }
             }
 
             // Don't spawn during police chase
@@ -91,14 +133,15 @@ public class ChestSpawner : MonoBehaviour
 
     /// <summary>
     /// Spawns a chest of the given type using the full normal spawn flow.
-    /// Called by SpawnLoop and exposed for debug tools.
+    /// Called by SpawnLoop and exposed for debug tools. Returns the spawned
+    /// <see cref="Chest"/> component, or null on failure.
     /// </summary>
-    public void SpawnChestOfType(ChestType type)
+    public Chest SpawnChestOfType(ChestType type)
     {
         if (commonChestPrefab == null || spawnTop == null || spawnBottom == null)
         {
             Debug.LogError("[ChestSpawner] Cannot spawn — prefab or spawn points are null!");
-            return;
+            return null;
         }
 
         GameObject prefab = GetPrefabForType(type);
@@ -125,19 +168,50 @@ public class ChestSpawner : MonoBehaviour
             mover.bottomTarget = spawnBottom;
 
         Debug.Log($"[ChestSpawner] Spawned {type} chest at {pos}");
+        return chest;
+    }
+
+    /// <summary>
+    /// Tutorial entry point: deterministically force-spawns a Common chest at
+    /// the top spawn point and tags it as the tutorial chest (so it triggers
+    /// the Z-center freeze handler in <see cref="Chest"/>). Bypasses the random
+    /// spawn interval — callers must check inventory-full / chase guards
+    /// before invoking. Returns the spawned <see cref="Chest"/> or null.
+    /// </summary>
+    public Chest ForceSpawnTutorialChest()
+    {
+        Chest chest = SpawnChestOfType(ChestType.Common);
+        if (chest != null)
+            chest.MarkAsTutorialChest(chestTutorialFreezeZ);
+        return chest;
     }
 
     private ChestType PickChestType()
     {
+        // Tutorial/free Common Chest phase: while the player has not yet opened
+        // their first 3 free Common Chests, every random spawn is forced to Common.
+        // Read the save directly so the decision is authoritative even if
+        // TutorialGate's static mirror has drifted across a scene transition.
+        TutorialSaveData tsd = TutorialSaveData.Load();
+        int openedCount = tsd != null ? tsd.tutorialFreeChestOpenedCount : 0;
+        if (openedCount < TutorialGate.TutorialFreeChestQuota)
+        {
+            Debug.Log($"[ChestSpawner][TutorialFree] PickChestType: openedCount={openedCount} < quota={TutorialGate.TutorialFreeChestQuota} → forcing Common");
+            return ChestType.Common;
+        }
+
         double playerMoney = CurrencyManager.Instance != null ? CurrencyManager.Instance.money : 0;
         ChestTypeConfig.GetSpawnWeights(playerMoney, out float wCommon, out float wRare, out float wLegendary);
 
         float total = wCommon + wRare + wLegendary;
         float roll = Random.Range(0f, total);
 
-        if (roll < wCommon) return ChestType.Common;
-        if (roll < wCommon + wRare) return ChestType.Rare;
-        return ChestType.Legendary;
+        ChestType picked;
+        if (roll < wCommon) picked = ChestType.Common;
+        else if (roll < wCommon + wRare) picked = ChestType.Rare;
+        else picked = ChestType.Legendary;
+        Debug.Log($"[ChestSpawner][Weighted] PickChestType: openedCount={openedCount} → weighted picked={picked}");
+        return picked;
     }
 
     private GameObject GetPrefabForType(ChestType type)

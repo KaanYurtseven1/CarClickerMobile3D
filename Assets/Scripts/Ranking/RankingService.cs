@@ -62,6 +62,9 @@ public class RankingService : MonoBehaviour
     /// <summary>The player's current global rank. 0 means unranked.</summary>
     public int PlayerRank { get; private set; }
 
+    /// <summary>True once ranking has been unlocked for this profile. Persists across app restarts.</summary>
+    public bool IsRankingUnlocked { get; private set; }
+
     /// <summary>Fired once when the player first receives a valid rank (rank > 0).</summary>
     public event Action OnPlayerRanked;
 
@@ -93,6 +96,7 @@ public class RankingService : MonoBehaviour
     private bool _eventHooksRegistered;
     private bool _isMainScene;
     private bool _isLoadInProgress;
+    private bool _profileRepairAttempted;
 
     // ─── PlayerPrefs Keys ───
 
@@ -100,6 +104,9 @@ public class RankingService : MonoBehaviour
     private const string PREF_REFRESH_TOKEN = "Ranking_RefreshToken";
     private const string PREF_USER_ID       = "Ranking_UserID";
     private const string PREF_DISPLAY_NAME  = "Ranking_DisplayName";
+    private const string PREF_RANKING_UNLOCKED = "Ranking_Unlocked";
+    private const string PREF_DB_VERSION = "Ranking_DBVersion";
+    private const int CURRENT_DB_VERSION = 2; // bump this number every time you recreate the DB
 
     // ─── Lifecycle ───
 
@@ -130,6 +137,7 @@ public class RankingService : MonoBehaviour
         _refreshToken = PlayerPrefs.GetString(PREF_REFRESH_TOKEN, "");
         _userId       = PlayerPrefs.GetString(PREF_USER_ID, "");
         _displayName  = PlayerPrefs.GetString(PREF_DISPLAY_NAME, "");
+        IsRankingUnlocked = PlayerPrefs.GetInt(PREF_RANKING_UNLOCKED, 0) == 1;
     }
 
     private void Start()
@@ -141,8 +149,6 @@ public class RankingService : MonoBehaviour
         // ── One-time fix: clear stale auth from before the DB was fixed ──
         // After the trigger is recreated, old tokens point to a user that no longer exists.
         // This block detects that case and forces a fresh signup.
-        const string PREF_DB_VERSION = "Ranking_DBVersion";
-        const int CURRENT_DB_VERSION = 2; // bump this number every time you recreate the DB
         if (PlayerPrefs.GetInt(PREF_DB_VERSION, 0) < CURRENT_DB_VERSION)
         {
             Debug.Log("[RankingService] DB version changed — clearing old auth cache.");
@@ -452,6 +458,8 @@ public class RankingService : MonoBehaviour
                 bool wasUnranked = PlayerRank <= 0;
                 if (result.rank > 0)
                     PlayerRank = result.rank;
+                if (result.rank > 0)
+                    MarkRankingUnlocked();
                 if (wasUnranked && PlayerRank > 0)
                     OnPlayerRanked?.Invoke();
 
@@ -577,12 +585,26 @@ public class RankingService : MonoBehaviour
 
             string json = request.downloadHandler.text;
 
-            // The RPC returns a single JSON object (wrapped in an array by Supabase REST).
-            // Structure: [{"entries": [...], "total_players": N, "self_rank": R}]
-            var wrapper = JsonUtility.FromJson<RankingDataModel.WindowedLeaderboardResponseWrapper>(
-                "{\"items\":" + json + "}");
+            // Supabase/PostgREST may return either:
+            // 1) a direct object: {"entries": [...], "total_players": N, "self_rank": R}
+            // 2) an array with one object: [{...}]
+            RankingDataModel.WindowedLeaderboardResponse rpcResult = null;
+            string trimmedJson = string.IsNullOrEmpty(json) ? "" : json.TrimStart();
 
-            if (wrapper == null || wrapper.items == null || wrapper.items.Length == 0)
+            if (trimmedJson.StartsWith("["))
+            {
+                var wrapper = JsonUtility.FromJson<RankingDataModel.WindowedLeaderboardResponseWrapper>(
+                    "{\"items\":" + json + "}");
+
+                if (wrapper != null && wrapper.items != null && wrapper.items.Length > 0)
+                    rpcResult = wrapper.items[0];
+            }
+            else if (trimmedJson.StartsWith("{"))
+            {
+                rpcResult = JsonUtility.FromJson<RankingDataModel.WindowedLeaderboardResponse>(json);
+            }
+
+            if (rpcResult == null)
             {
                 Debug.LogWarning("[RankingService] Leaderboard response was empty: " + json);
                 _leaderboardFetchInProgress = false;
@@ -590,7 +612,6 @@ public class RankingService : MonoBehaviour
                 yield break;
             }
 
-            var rpcResult = wrapper.items[0];
             var entries = rpcResult.entries ?? new RankingDataModel.LeaderboardEntry[0];
             int totalPlayers = rpcResult.total_players;
             int selfRank = rpcResult.self_rank;
@@ -619,6 +640,8 @@ public class RankingService : MonoBehaviour
             // Update PlayerRank and fire event if this is the first time
             bool wasUnranked = PlayerRank <= 0;
             PlayerRank = selfRank;
+            if (selfRank > 0)
+                MarkRankingUnlocked();
             if (wasUnranked && selfRank > 0)
                 OnPlayerRanked?.Invoke();
 
@@ -644,6 +667,7 @@ public class RankingService : MonoBehaviour
         }
 
         _authInProgress = true;
+        _profileRepairAttempted = false;
 
         if (string.IsNullOrEmpty(_userId))
         {
@@ -763,16 +787,9 @@ public class RankingService : MonoBehaviour
 
         _refreshInProgress = false;
 
-        // If we already have a display name cached, we're done.
-        // Otherwise fetch it from the server.
-        if (!string.IsNullOrEmpty(_displayName))
-        {
-            MarkAuthenticated();
-        }
-        else
-        {
-            yield return FetchOwnProfile();
-        }
+        // Always validate profile existence server-side after refresh.
+        // Cached names can become stale after backend cleanup.
+        yield return FetchOwnProfile();
     }
 
     /// <summary>
@@ -815,7 +832,20 @@ public class RankingService : MonoBehaviour
             }
             else
             {
-                Debug.LogWarning("[RankingService] Profile response was empty: " + json);
+                Debug.LogWarning("[RankingService] Profile row missing for current user: " + _userId +
+                                 " | Response: " + json);
+
+                if (!_profileRepairAttempted)
+                {
+                    _profileRepairAttempted = true;
+                    Debug.LogWarning("[RankingService] Attempting one-time profile repair by creating a new anonymous identity.");
+                    ClearSavedAuth();
+                    yield return SignUpAnonymous();
+                    yield break;
+                }
+
+                Debug.LogError("[RankingService] Profile repair failed after one attempt. Ranking auth remains unavailable.");
+                yield break;
             }
         }
 
@@ -844,6 +874,97 @@ public class RankingService : MonoBehaviour
         PlayerPrefs.Save();
     }
 
+    /// <summary>
+    /// Re-writes auth/profile keys to PlayerPrefs after external save resets.
+    /// Keeps identity stable while game-economy progress is reset.
+    /// </summary>
+    public void PersistAuthCacheToPlayerPrefs()
+    {
+        if (string.IsNullOrEmpty(_accessToken) || string.IsNullOrEmpty(_refreshToken) || string.IsNullOrEmpty(_userId))
+            return;
+
+        PlayerPrefs.SetString(PREF_ACCESS_TOKEN, _accessToken);
+        PlayerPrefs.SetString(PREF_REFRESH_TOKEN, _refreshToken);
+        PlayerPrefs.SetString(PREF_USER_ID, _userId);
+
+        if (!string.IsNullOrEmpty(_displayName))
+            PlayerPrefs.SetString(PREF_DISPLAY_NAME, _displayName);
+
+        PlayerPrefs.SetInt(PREF_DB_VERSION, CURRENT_DB_VERSION);
+        PlayerPrefs.Save();
+    }
+
+    /// <summary>Resets local rank/unlock state so UI behaves like a fresh player.</summary>
+    public void ResetRankingClientProgress()
+    {
+        PlayerRank = 0;
+        LastSubmittedScore = 0;
+        LastLeaderboardResult = null;
+        IsRankingUnlocked = false;
+
+        PlayerPrefs.SetInt(PREF_RANKING_UNLOCKED, 0);
+        PlayerPrefs.Save();
+    }
+
+    /// <summary>
+    /// Clears this player's ranking progression from backend and resets local rank/unlock state.
+    /// Calls onComplete(true) only when backend reset succeeds.
+    /// </summary>
+    public void ResetRankingProgressForCurrentPlayer(Action<bool> onComplete)
+    {
+        StartCoroutine(ResetRankingProgressForCurrentPlayerCoroutine(onComplete, 0));
+    }
+
+    private IEnumerator ResetRankingProgressForCurrentPlayerCoroutine(Action<bool> onComplete, int attempt)
+    {
+        if (!IsAuthenticated || string.IsNullOrEmpty(_userId))
+        {
+            Debug.LogWarning("[RankingService] Ranking reset requested before auth is ready.");
+            onComplete?.Invoke(false);
+            yield break;
+        }
+
+        string url = supabaseUrl.TrimEnd('/') + "/rest/v1/rpc/reset_player_ranking_progress";
+        string body = JsonUtility.ToJson(new RankingResetPayload { target_player_id = _userId });
+
+        using (var request = new UnityWebRequest(url, "POST"))
+        {
+            byte[] bodyRaw = Encoding.UTF8.GetBytes(body);
+            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("apikey", supabaseAnonKey);
+            request.SetRequestHeader("Authorization", "Bearer " + _accessToken);
+            request.SetRequestHeader("Content-Type", "application/json");
+
+            yield return request.SendWebRequest();
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning($"[RankingService] Backend ranking reset failed: {request.error} " +
+                                 $"(HTTP {request.responseCode}) Response: {request.downloadHandler?.text}");
+
+                if (request.responseCode == 401 && attempt < 1)
+                {
+                    Debug.Log("[RankingService] Ranking reset got 401 — refreshing token and retrying once.");
+                    yield return RefreshAccessToken();
+
+                    if (IsAuthenticated)
+                    {
+                        yield return ResetRankingProgressForCurrentPlayerCoroutine(onComplete, attempt + 1);
+                        yield break;
+                    }
+                }
+
+                onComplete?.Invoke(false);
+                yield break;
+            }
+        }
+
+        ResetRankingClientProgress();
+        Debug.Log("[RankingService] Backend ranking progression cleared for current player.");
+        onComplete?.Invoke(true);
+    }
+
     private void ClearSavedAuth()
     {
         _accessToken  = "";
@@ -851,12 +972,25 @@ public class RankingService : MonoBehaviour
         _userId       = "";
         _displayName  = "";
         IsAuthenticated = false;
+        IsRankingUnlocked = false;
+        PlayerRank = 0;
 
         PlayerPrefs.DeleteKey(PREF_ACCESS_TOKEN);
         PlayerPrefs.DeleteKey(PREF_REFRESH_TOKEN);
         PlayerPrefs.DeleteKey(PREF_USER_ID);
         PlayerPrefs.DeleteKey(PREF_DISPLAY_NAME);
+        PlayerPrefs.DeleteKey(PREF_RANKING_UNLOCKED);
         PlayerPrefs.Save();
+    }
+
+    private void MarkRankingUnlocked()
+    {
+        if (IsRankingUnlocked) return;
+
+        IsRankingUnlocked = true;
+        PlayerPrefs.SetInt(PREF_RANKING_UNLOCKED, 1);
+        PlayerPrefs.Save();
+        Debug.Log("[RankingService] Ranking unlocked permanently for this profile.");
     }
 
     /// <summary>
@@ -964,6 +1098,12 @@ public class RankingService : MonoBehaviour
     {
         public string target_player_id;
         public int    max_visible;
+    }
+
+    [Serializable]
+    private class RankingResetPayload
+    {
+        public string target_player_id;
     }
 
 }

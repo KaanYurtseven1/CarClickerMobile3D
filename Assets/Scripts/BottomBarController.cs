@@ -49,8 +49,8 @@ public class BottomBarController : MonoBehaviour
     {
         if (_rankingButton == null) return;
 
-        bool isRanked = RankingService.Instance != null && RankingService.Instance.PlayerRank > 0;
-        _rankingButton.interactable = isRanked;
+        bool isUnlocked = RankingService.Instance != null && RankingService.Instance.IsRankingUnlocked;
+        _rankingButton.interactable = isUnlocked;
     }
 
     private void OnPlayerBecameRanked()
@@ -67,8 +67,8 @@ public class BottomBarController : MonoBehaviour
         // Block switching to the ranking tab if unranked
         if (index == rankingTabIndex)
         {
-            bool isRanked = RankingService.Instance != null && RankingService.Instance.PlayerRank > 0;
-            if (!isRanked)
+            bool isUnlocked = RankingService.Instance != null && RankingService.Instance.IsRankingUnlocked;
+            if (!isUnlocked)
             {
                 Debug.Log("[BottomBar] Ranking tab blocked — player is not yet ranked.");
                 return;

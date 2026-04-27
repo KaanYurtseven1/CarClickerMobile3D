@@ -26,6 +26,7 @@ public class SaveSystem : MonoBehaviour
 
     // Guard against double-load (Start + OnSceneLoaded both firing on initial "Main" scene)
     private bool _hasLoadedThisSession = false;
+    private bool _isHardResetInProgress = false;
 
     // ========== BUILDING SAVE-KEY MIGRATION ==========
     // Old saves used: "Save_Building_{EnumName}_Count" (string-based).
@@ -160,6 +161,12 @@ public class SaveSystem : MonoBehaviour
 
     public void SaveGame()
     {
+        if (_isHardResetInProgress)
+        {
+            Debug.Log("[SaveSystem] SaveGame skipped — hard reset in progress.");
+            return;
+        }
+
         // 1) Chest data her durumda kaydedilsin
         if (ChestInventoryManager.Instance != null)
         {
@@ -324,87 +331,93 @@ public class SaveSystem : MonoBehaviour
             ChestShownUI.Instance.RefreshVisibilityAndCount();
         }
 
-        // 2) HasSave yoksa ekonomi vs zaten yoktur, burada çıkabiliriz
-        if (!PlayerPrefs.HasKey("HasSave"))
-        {
-            Debug.Log("[SaveSystem] No save found, starting fresh (chests loaded if any).");
-            return;
-        }
+        bool hasSave = PlayerPrefs.HasKey("HasSave");
+
+        if (!hasSave)
+            Debug.Log("[SaveSystem] No save found. Applying fresh runtime defaults.");
 
         // 3) Ekonomi load
         var cm = CurrencyManager.Instance;
         if (cm == null)
         {
             Debug.LogWarning("[SaveSystem] CurrencyManager.Instance is NULL, economy not loaded (chests loaded).");
+            _isHardResetInProgress = false;
             return;
         }
 
-        // ---- DIAGNOSTIC: log raw PlayerPrefs strings before parsing ----
-        string rawMoney = PlayerPrefs.GetString("Save_Money", "");
-        string rawMPS = PlayerPrefs.GetString("Save_MPS", "");
-        string rawMPT = PlayerPrefs.GetString("Save_MPT", "");
-        string rawTotal = PlayerPrefs.GetString("Save_TotalMoney", "");
-        Debug.Log($"[SaveSystem] LOAD raw strings: Save_Money='{rawMoney}' Save_MPS='{rawMPS}' Save_MPT='{rawMPT}' Save_TotalMoney='{rawTotal}'");
-
-        cm.money = GetDouble("Save_Money", cm.money);
-        cm.moneyPerSecond = GetDouble("Save_MPS", cm.moneyPerSecond);
-        cm.moneyPerTap = GetDouble("Save_MPT", cm.moneyPerTap);
-
-        cm.totalMoneyEarned = GetDouble("Save_TotalMoney", cm.totalMoneyEarned);
-        cm.nitroCoins = PlayerPrefs.GetInt("Save_NitroCoins", cm.nitroCoins);
-        cm.premiumCurrency = PlayerPrefs.GetInt("Save_PremiumCurrency", cm.premiumCurrency);
-
-        Debug.Log($"[SaveSystem] LOAD parsed: money={cm.money} MPS={cm.moneyPerSecond} MPT={cm.moneyPerTap} total={cm.totalMoneyEarned} nitro={cm.nitroCoins} premium={cm.premiumCurrency}");
-        cm.ResetMpsAfterLoad();
-
-        UpgradeButton[] upgrades = FindObjectsByType<UpgradeButton>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (var up in upgrades)
+        if (hasSave)
         {
-            string key = "Save_Upgrade_" + up.upgradeType.ToString() + "_Level";
-            int level = PlayerPrefs.GetInt(key, 0);
-            up.LoadFromSave(level);
-        }
+            // ---- DIAGNOSTIC: log raw PlayerPrefs strings before parsing ----
+            string rawMoney = PlayerPrefs.GetString("Save_Money", "");
+            string rawMPS = PlayerPrefs.GetString("Save_MPS", "");
+            string rawMPT = PlayerPrefs.GetString("Save_MPT", "");
+            string rawTotal = PlayerPrefs.GetString("Save_TotalMoney", "");
+            Debug.Log($"[SaveSystem] LOAD raw strings: Save_Money='{rawMoney}' Save_MPS='{rawMPS}' Save_MPT='{rawMPT}' Save_TotalMoney='{rawTotal}'");
 
-        if (BuildingManager.Instance != null)
-        {
-            LoadBuildingsWithMigration();
-        }
+            cm.money = GetDouble("Save_Money", cm.money);
+            cm.moneyPerSecond = GetDouble("Save_MPS", cm.moneyPerSecond);
+            cm.moneyPerTap = GetDouble("Save_MPT", cm.moneyPerTap);
 
-        // Re-apply upgrade effects after building recalc.
-        // Building recalc resets MPS/MPT to building-only values;
-        // this restores upgrade contributions. Additives first, then multiplicatives.
-        {
-            UpgradeButton[] upgradesReapply = FindObjectsByType<UpgradeButton>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            foreach (var up in upgradesReapply)
+            cm.totalMoneyEarned = GetDouble("Save_TotalMoney", cm.totalMoneyEarned);
+            cm.nitroCoins = PlayerPrefs.GetInt("Save_NitroCoins", cm.nitroCoins);
+            cm.premiumCurrency = PlayerPrefs.GetInt("Save_PremiumCurrency", cm.premiumCurrency);
+
+            Debug.Log($"[SaveSystem] LOAD parsed: money={cm.money} MPS={cm.moneyPerSecond} MPT={cm.moneyPerTap} total={cm.totalMoneyEarned} nitro={cm.nitroCoins} premium={cm.premiumCurrency}");
+            cm.ResetMpsAfterLoad();
+
+            UpgradeButton[] upgrades = FindObjectsByType<UpgradeButton>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var up in upgrades)
             {
-                if (up.upgradeType != UpgradeType.Global)
-                    up.ReapplyEffect();
-            }
-            foreach (var up in upgradesReapply)
-            {
-                if (up.upgradeType == UpgradeType.Global)
-                    up.ReapplyEffect();
-            }
-        }
-
-        if (CardManager.Instance != null && CardManager.Instance.cards != null)
-        {
-            foreach (var card in CardManager.Instance.cards)
-            {
-                string prefix = "Save_Card_" + card.type.ToString() + "_";
-                int oldLvl = card.currentLevel;
-                int oldCop = card.copiesOwned;
-                card.currentLevel = PlayerPrefs.GetInt(prefix + "Level", card.currentLevel);
-                card.copiesOwned = PlayerPrefs.GetInt(prefix + "Copies", card.copiesOwned);
-                if (card.copiesOwned != oldCop || card.currentLevel != oldLvl)
-                    Debug.Log($"[SaveSystem] LOAD card {card.type}: was L{oldLvl} copies={oldCop} → now L{card.currentLevel} copies={card.copiesOwned}");
+                string key = "Save_Upgrade_" + up.upgradeType.ToString() + "_Level";
+                int level = PlayerPrefs.GetInt(key, 0);
+                up.LoadFromSave(level);
             }
 
-            CardManager.Instance.ReapplyAllCardEffects();
+            if (BuildingManager.Instance != null)
+            {
+                LoadBuildingsWithMigration();
+            }
+
+            // Re-apply upgrade effects after building recalc.
+            // Building recalc resets MPS/MPT to building-only values;
+            // this restores upgrade contributions. Additives first, then multiplicatives.
+            {
+                UpgradeButton[] upgradesReapply = FindObjectsByType<UpgradeButton>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                foreach (var up in upgradesReapply)
+                {
+                    if (up.upgradeType != UpgradeType.Global)
+                        up.ReapplyEffect();
+                }
+                foreach (var up in upgradesReapply)
+                {
+                    if (up.upgradeType == UpgradeType.Global)
+                        up.ReapplyEffect();
+                }
+            }
+
+            if (CardManager.Instance != null && CardManager.Instance.cards != null)
+            {
+                foreach (var card in CardManager.Instance.cards)
+                {
+                    string prefix = "Save_Card_" + card.type.ToString() + "_";
+                    int oldLvl = card.currentLevel;
+                    int oldCop = card.copiesOwned;
+                    card.currentLevel = PlayerPrefs.GetInt(prefix + "Level", card.currentLevel);
+                    card.copiesOwned = PlayerPrefs.GetInt(prefix + "Copies", card.copiesOwned);
+                    if (card.copiesOwned != oldCop || card.currentLevel != oldLvl)
+                        Debug.Log($"[SaveSystem] LOAD card {card.type}: was L{oldLvl} copies={oldCop} → now L{card.currentLevel} copies={card.copiesOwned}");
+                }
+
+                CardManager.Instance.ReapplyAllCardEffects();
+            }
+            else
+            {
+                Debug.LogWarning("[SaveSystem] LoadGame: CardManager.Instance or cards is NULL — card data NOT loaded!");
+            }
         }
         else
         {
-            Debug.LogWarning("[SaveSystem] LoadGame: CardManager.Instance or cards is NULL — card data NOT loaded!");
+            ApplyFreshStartRuntimeDefaults(cm);
         }
 
         // NitroMagnet state
@@ -461,6 +474,7 @@ public class SaveSystem : MonoBehaviour
         Debug.Log($"[SaveSystem] Game loaded. Final money={cm.money:F2} MPS={cm.moneyPerSecond:F4} MPT={cm.moneyPerTap:F4}");
 
         _hasLoadedThisSession = true;
+        _isHardResetInProgress = false;
 
         // Start post-load money watcher (3-second diagnostic window)
         cm.StartLoadWatcher();
@@ -644,11 +658,13 @@ public class SaveSystem : MonoBehaviour
 
     private void OnApplicationQuit()
     {
+        if (_isHardResetInProgress) return;
         SaveGame();
     }
 
     private void OnApplicationPause(bool pauseStatus)
     {
+        if (_isHardResetInProgress) return;
         if (pauseStatus)
             SaveGame();
     }
@@ -662,19 +678,110 @@ public class SaveSystem : MonoBehaviour
     [ContextMenu("DEVELOPER: Reset Save & Reload Scene")]
     public void DeveloperResetGame()
     {
-        Debug.Log("[SaveSystem] DeveloperResetGame called. Deleting PlayerPrefs.");
-
-        PlayerPrefs.DeleteAll();
-        PlayerPrefs.Save();
-
         if (!Application.isPlaying)
         {
             Debug.LogWarning("[SaveSystem] DeveloperResetGame: Not in play mode, scene reload skipped.");
             return;
         }
 
+        StartCoroutine(DeveloperResetGameCoroutine());
+    }
+
+    private IEnumerator DeveloperResetGameCoroutine()
+    {
+        _isHardResetInProgress = true;
+        Debug.Log("[SaveSystem] DeveloperResetGame called. Resetting backend ranking and local save.");
+
+        bool backendResetSucceeded = false;
+        bool backendResetCompleted = false;
+
+        if (RankingService.Instance != null)
+        {
+            RankingService.Instance.ResetRankingProgressForCurrentPlayer(success =>
+            {
+                backendResetSucceeded = success;
+                backendResetCompleted = true;
+            });
+
+            while (!backendResetCompleted)
+                yield return null;
+
+            if (!backendResetSucceeded)
+            {
+                Debug.LogError("[SaveSystem] Backend ranking reset failed. Hard reset aborted to avoid inconsistent state.");
+                _isHardResetInProgress = false;
+                yield break;
+            }
+        }
+        else
+        {
+            Debug.LogError("[SaveSystem] RankingService not found during reset. Hard reset aborted.");
+            _isHardResetInProgress = false;
+            yield break;
+        }
+
+        PlayerPrefs.DeleteAll();
+
+        // Keep auth identity stable after local reset, but keep ranking progression locked/reset.
+        if (RankingService.Instance != null)
+        {
+            RankingService.Instance.ResetRankingClientProgress();
+            RankingService.Instance.PersistAuthCacheToPlayerPrefs();
+        }
+
+        PlayerPrefs.Save();
+
         var current = SceneManager.GetActiveScene();
         SceneManager.LoadScene(current.buildIndex);
+    }
+
+    private void ApplyFreshStartRuntimeDefaults(CurrencyManager cm)
+    {
+        // Economy defaults
+        cm.money = 0;
+        cm.moneyPerSecond = 0;
+        cm.moneyPerTap = 1;
+        cm.totalMoneyEarned = 0;
+        cm.nitroCoins = 0;
+        cm.premiumCurrency = 0;
+        cm.suppressTopBarMoneyUpdates = false;
+        cm.bufferedEarnings = 0;
+        cm.SetBoostMultiplier(1f);
+        cm.ResetMpsAfterLoad();
+
+        // Upgrade levels and registry
+        if (UpgradeSaveRegistry.Instance != null)
+            UpgradeSaveRegistry.Instance.ClearAll();
+
+        UpgradeButton[] upgrades = FindObjectsByType<UpgradeButton>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var up in upgrades)
+            up.LoadFromSave(0);
+
+        // Buildings
+        if (BuildingManager.Instance != null && BuildingManager.Instance.buildings != null)
+        {
+            foreach (var b in BuildingManager.Instance.buildings)
+            {
+                if (b == null) continue;
+                BuildingManager.Instance.SetBuildingCount(b.type, 0);
+            }
+            BuildingManager.Instance.RecalculateMPSFromBuildings();
+        }
+
+        // Cards
+        if (CardManager.Instance != null && CardManager.Instance.cards != null)
+        {
+            foreach (var card in CardManager.Instance.cards)
+            {
+                card.currentLevel = 0;
+                card.copiesOwned = 0;
+            }
+            CardManager.Instance.ReapplyAllCardEffects();
+        }
+
+        // Blacklist lifetime counters
+        if (BlacklistStatTracker.Instance != null)
+            BlacklistStatTracker.Instance.ResetCountersForFreshStart();
     }
 
 

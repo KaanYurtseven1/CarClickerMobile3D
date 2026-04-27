@@ -41,6 +41,10 @@ public class ChestPopupController : MonoBehaviour
     [SerializeField] private GameObject halfTimeObj;     // Replaces skip20Obj
     [SerializeField] private GameObject openObj;
 
+    [Header("Open Button (Tutorial Free Override)")]
+    [Tooltip("TextMeshPro label inside the Open button. When the chest is one of the first 3 free tutorial Common Chests, this is overridden to 'Open (Free)'.")]
+    [SerializeField] private TextMeshProUGUI openButtonText;
+
     [Header("Per-Type Visuals")]
     [SerializeField] private Image popupBackgroundImage;
     [SerializeField] private Image chestDisplayImage;
@@ -76,10 +80,17 @@ public class ChestPopupController : MonoBehaviour
     /// <summary>CanvasGroup on popupRoot — resolved or added at runtime.</summary>
     private CanvasGroup _rootCanvasGroup;
 
+    /// <summary>Cached original text on the Open button so non-tutorial chests render the designer-authored label.</summary>
+    private string _defaultOpenButtonText;
+
     private void Awake()
     {
         if (Instance == null) Instance = this;
         else if (Instance != this) { Destroy(gameObject); return; }
+
+        // Cache the original Open button label for non-tutorial chests.
+        if (openButtonText != null)
+            _defaultOpenButtonText = openButtonText.text;
 
         // Ensure CanvasGroup exists on popupRoot for fade animation
         if (popupRoot != null)
@@ -119,6 +130,18 @@ public class ChestPopupController : MonoBehaviour
             return;
         }
 
+        // Diagnostic: report the exact ChestData the popup is about to render.
+        if (ChestInventoryManager.Instance != null)
+        {
+            var diag = ChestInventoryManager.Instance.GetChestAt(chestIndex);
+            if (diag != null)
+                Debug.Log($"[ChestPopup][TutorialFree] ShowPopupForChest data: type={diag.chestType} state={diag.state} isTutorialFreeChest={diag.isTutorialFreeChest}");
+            else
+                Debug.LogWarning($"[ChestPopup][TutorialFree] ShowPopupForChest data: NULL at index {chestIndex}");
+        }
+
+        ApplyTutorialFreeChestOverrides(chestIndex);
+
         // U4: Chest popup open SFX
         if (SFXManager.Instance != null)
             SFXManager.Instance.PlayPopupAppear();
@@ -126,6 +149,47 @@ public class ChestPopupController : MonoBehaviour
         popupRoot.SetActive(true);
         RefreshUI();
         PlayOpenAnimation();
+    }
+
+    /// <summary>
+    /// Applies tutorial-free-chest overrides: rewrites the Open button label to
+    /// "Open (Free)" and (only on the very first tutorial popup ever shown)
+    /// disables the outside-click-to-close blocker so the player must press Open.
+    /// </summary>
+    private void ApplyTutorialFreeChestOverrides(int chestIndex)
+    {
+        bool isTutorialFree = false;
+        if (ChestInventoryManager.Instance != null)
+        {
+            var cd = ChestInventoryManager.Instance.GetChestAt(chestIndex);
+            if (cd != null) isTutorialFree = cd.isTutorialFreeChest;
+        }
+
+        if (openButtonText != null)
+            openButtonText.text = isTutorialFree ? "Open (Free)" : _defaultOpenButtonText;
+
+        if (outsideClickBlocker != null)
+        {
+            if (isTutorialFree)
+            {
+                TutorialSaveData data = TutorialSaveData.Load();
+                if (!data.firstTutorialPopupShown)
+                {
+                    // First tutorial popup ever — force the player through Open.
+                    outsideClickBlocker.interactable = false;
+                    data.firstTutorialPopupShown = true;
+                    data.Save();
+                }
+                else
+                {
+                    outsideClickBlocker.interactable = true;
+                }
+            }
+            else
+            {
+                outsideClickBlocker.interactable = true;
+            }
+        }
     }
 
     /// <summary>Legacy: shows first available chest.</summary>
@@ -274,6 +338,30 @@ public class ChestPopupController : MonoBehaviour
                 SetActive(openObj, true);
                 break;
         }
+
+        // Tutorial/free chest visual override (UI-only, never mutates ChestData/state).
+        // Guarantees the popup shows ONLY the Open button labeled "Open (Free)" even if
+        // some other code path drifts the state-driven visuals.
+        if (cd.isTutorialFreeChest)
+            ApplyTutorialFreeChestPopupState();
+    }
+
+    /// <summary>
+    /// Force the popup visuals into the tutorial/free configuration:
+    /// hide timer/start-unlock/half-time/open-now, show open + reward text,
+    /// and stamp the Open button label as "Open (Free)". Does NOT mutate
+    /// <see cref="ChestInventoryManager.ChestData"/> or any save data —
+    /// state ownership stays in the inventory layer.
+    /// </summary>
+    private void ApplyTutorialFreeChestPopupState()
+    {
+        SetActive(timerTextObj, false);
+        SetActive(startUnlockObj, false);
+        SetActive(halfTimeObj, false);
+        SetActive(openNowObj, false);
+        SetActive(openObj, true);
+        SetActive(openGetRewardTextObj, true);
+        if (openButtonText != null) openButtonText.text = "Open (Free)";
     }
 
     private void UpdateOpenNowCost(ChestType type)

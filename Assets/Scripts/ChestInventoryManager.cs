@@ -21,6 +21,7 @@ public class ChestInventoryManager : MonoBehaviour
     private static void ResetStatics()
     {
         Instance = null;
+        OnChestRemovedAfterOpen = null;
     }
 
     [Serializable]
@@ -32,6 +33,14 @@ public class ChestInventoryManager : MonoBehaviour
         public ChestState state;
         public long unlockEndUtcTicks;  // UTC ticks when unlock finishes
         public bool halfTimeUsed;
+
+        /// <summary>
+        /// True if this chest is one of the first 3 free tutorial Common Chests.
+        /// Such chests are added directly in <see cref="ChestState.ReadyToOpen"/> state
+        /// (no Idle/Unlocking timer) and the chest popup shows an "Open (Free)" button
+        /// instead of the StartUnlock/HalfTime/OpenNow flow.
+        /// </summary>
+        public bool isTutorialFreeChest;
 
         public ChestData() { }
 
@@ -57,6 +66,13 @@ public class ChestInventoryManager : MonoBehaviour
     public const int MaxChestSlots = 5;
 
     public event Action OnInventoryChanged;
+
+    /// <summary>
+    /// Raised when a chest in <see cref="ChestState.OpeningInProgress"/> is removed from inventory
+    /// (rewards have just been committed). Subscribers receive the removed <see cref="ChestData"/>
+    /// snapshot. Used by <see cref="TutorialManager"/> to bump the free-chest opened count.
+    /// </summary>
+    public static event Action<ChestData> OnChestRemovedAfterOpen;
 
     private void Awake()
     {
@@ -181,19 +197,51 @@ public class ChestInventoryManager : MonoBehaviour
         }
 
         ChestType type = worldChest.chestType;
+
+        // Tutorial/free Common Chest decision: read the save directly so the
+        // decision is authoritative even if TutorialGate's static mirror is
+        // stale (e.g. after a scene transition where SyncFromSave order races
+        // with spawn timing).
+        TutorialSaveData _tsd = TutorialSaveData.Load();
+        int openedCount = Mathf.Clamp(_tsd != null ? _tsd.tutorialFreeChestOpenedCount : 0, 0, TutorialGate.TutorialFreeChestQuota);
+        int unopenedFree = CountTutorialFreeUnopenedChests();
+        bool isTutorialFree = (openedCount + unopenedFree) < TutorialGate.TutorialFreeChestQuota;
+
         ChestData cd = new ChestData
         {
             chestType = type,
             chestName = ChestTypeConfig.GetDisplayName(type),
             unlockDurationSeconds = ChestTypeConfig.GetUnlockDuration(type),
-            state = ChestState.Idle,
+            state = isTutorialFree ? ChestState.ReadyToOpen : ChestState.Idle,
             unlockEndUtcTicks = 0,
-            halfTimeUsed = false
+            halfTimeUsed = false,
+            isTutorialFreeChest = isTutorialFree
         };
 
         chests.Add(cd);
+        // Mirror save → gate so subsequent code that reads TutorialGate sees the same value.
+        TutorialGate.SetTutorialFreeChestOpenedCount(openedCount);
         NotifyChanged();
-        DLog($"Added chest: {cd.chestName} ({type}), count={chests.Count}");
+        Debug.Log($"[ChestInvMgr][TutorialFree] AddChestFromWorld: type={type} openedCount={openedCount} unopenedFree={unopenedFree} quota={TutorialGate.TutorialFreeChestQuota} → isTutorialFree={isTutorialFree} state={cd.state} count={chests.Count}");
+    }
+
+    /// <summary>
+    /// Number of chests currently in inventory that are tagged as tutorial/free and
+    /// not yet opened (i.e. still ReadyToOpen — OpeningInProgress is excluded since
+    /// it is about to be removed by <see cref="RemoveOpeningChest"/>).
+    /// </summary>
+    public int CountTutorialFreeUnopenedChests()
+    {
+        int n = 0;
+        for (int i = 0; i < chests.Count; i++)
+        {
+            var c = chests[i];
+            if (c == null) continue;
+            if (!c.isTutorialFreeChest) continue;
+            if (c.state == ChestState.OpeningInProgress) continue;
+            n++;
+        }
+        return n;
     }
 
     /// <summary>
@@ -362,6 +410,7 @@ public class ChestInventoryManager : MonoBehaviour
     {
         if (!PlayerPrefs.HasKey(KEY_CHEST_BLOB))
         {
+            chests = new List<ChestData>();
             NotifyChanged();
             return;
         }
@@ -369,6 +418,7 @@ public class ChestInventoryManager : MonoBehaviour
         string json = PlayerPrefs.GetString(KEY_CHEST_BLOB, "");
         if (string.IsNullOrEmpty(json))
         {
+            chests = new List<ChestData>();
             NotifyChanged();
             return;
         }
@@ -383,6 +433,14 @@ public class ChestInventoryManager : MonoBehaviour
             {
                 var cd = chests[i];
                 if (cd.state == ChestState.Unlocking && cd.GetRemainingSeconds() <= 0f)
+                {
+                    cd.state = ChestState.ReadyToOpen;
+                    cd.unlockEndUtcTicks = 0;
+                }
+
+                // Migration / safety: a tutorial-free chest must always be ReadyToOpen
+                // (unless it is mid-open). Older saves may have persisted Idle.
+                if (cd.isTutorialFreeChest && cd.state != ChestState.OpeningInProgress && cd.state != ChestState.ReadyToOpen)
                 {
                     cd.state = ChestState.ReadyToOpen;
                     cd.unlockEndUtcTicks = 0;
@@ -443,13 +501,60 @@ public class ChestInventoryManager : MonoBehaviour
             if (chests[i].state == ChestState.OpeningInProgress)
             {
                 Debug.Log($"[ChestInvMgr] Removing OpeningInProgress chest at index {i}.");
+                ChestData removed = chests[i];
                 chests.RemoveAt(i);
                 NotifyChanged();
+
+                // Tutorial/free chest accounting must happen here — RemoveOpeningChest
+                // runs from ChestOpenScene, where TutorialManager (a Main-scene object)
+                // has already been destroyed and therefore cannot react to the static
+                // OnChestRemovedAfterOpen event in time. Persist the increment now so
+                // Main reload picks it up via TutorialSaveData.Load().
+                if (removed != null && removed.isTutorialFreeChest)
+                    BumpTutorialFreeChestOpenedCount();
+
+                try { OnChestRemovedAfterOpen?.Invoke(removed); }
+                catch (Exception ex) { Debug.LogException(ex); }
                 return true;
             }
         }
         Debug.LogWarning("[ChestInvMgr] RemoveOpeningChest: no OpeningInProgress chest found.");
         return false;
+    }
+
+    /// <summary>
+    /// Reads the current tutorial save, increments the tutorial-free chest count
+    /// (clamped to <see cref="TutorialGate.TutorialFreeChestQuota"/>), saves, and
+    /// mirrors the new value into <see cref="TutorialGate"/>. Idempotent at the
+    /// quota cap so accidental double-calls are safe.
+    /// </summary>
+    private static void BumpTutorialFreeChestOpenedCount()
+    {
+        TutorialSaveData data = TutorialSaveData.Load();
+        int prior = data.tutorialFreeChestOpenedCount;
+        int next = Mathf.Min(prior + 1, TutorialGate.TutorialFreeChestQuota);
+        Debug.Log($"[ChestInvMgr][TutorialFree] BumpTutorialFreeChestOpenedCount: prior={prior} → next={next} (quota={TutorialGate.TutorialFreeChestQuota}) flags chestUnlocked={data.chestUnlocked} tutorialChestCollected={data.tutorialChestCollected} chestSlotTutorialShown={data.chestSlotTutorialShown} firstTutorialPopupShown={data.firstTutorialPopupShown}");
+        if (next == prior)
+        {
+            Debug.Log($"[ChestInvMgr] Tutorial-free open: count already at {prior}, no-op.");
+            return;
+        }
+        data.tutorialFreeChestOpenedCount = next;
+
+        // The 0 → 1 transition is the canonical "first free chest just got
+        // opened" edge. Mark the post-first-chest Shop&Cards tutorial pointer
+        // as pending so that on the next Main scene load TutorialManager will
+        // show UI_Tutorial/Three_New regardless of any other transient state.
+        // Persisted here (in ChestOpenScene) so it survives the scene swap.
+        if (prior == 0 && next == 1 && !data.shopCardsClickedAfterFirstChest)
+        {
+            data.postFirstChestShopTutorialPending = true;
+            Debug.Log("[ChestInvMgr][TutorialFree] postFirstChestShopTutorialPending = TRUE (first free chest just opened).");
+        }
+
+        data.Save();
+        TutorialGate.SetTutorialFreeChestOpenedCount(next);
+        Debug.Log($"[ChestInvMgr] Tutorial-free chest opened. count={next}/{TutorialGate.TutorialFreeChestQuota} (saved+gated)");
     }
 
     /// <summary>

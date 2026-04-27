@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using DG.Tweening;
@@ -6,8 +7,16 @@ public class ChestShownUI : MonoBehaviour
 {
     public static ChestShownUI Instance;
 
+    /// <summary>
+    /// Raised when the player taps a chest slot in the ChestShown list. Receives
+    /// the inventory index. Subscribers (e.g. <see cref="TutorialManager"/>) can
+    /// observe slot taps without intercepting the existing ChestPopup open flow,
+    /// which still runs in <see cref="OnSlotTapped"/>.
+    /// </summary>
+    public static event Action<int> OnSlotTappedEvent;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    private static void ResetStatics() { Instance = null; }
+    private static void ResetStatics() { Instance = null; OnSlotTappedEvent = null; }
 
     [Header("Slot System")]
     [SerializeField] private Transform slotContainer; // ChestShownPlace with VerticalLayoutGroup
@@ -124,6 +133,12 @@ public class ChestShownUI : MonoBehaviour
     private void OnSlotTapped(int chestIndex)
     {
         Debug.Log($"[ChestShownUI] OnSlotTapped({chestIndex}) called");
+
+        // Notify subscribers (TutorialManager hides Seven on this event) BEFORE
+        // opening the popup so the pointer fades in sync with the popup intro.
+        try { OnSlotTappedEvent?.Invoke(chestIndex); }
+        catch (Exception ex) { Debug.LogException(ex); }
+
         if (ChestPopupController.Instance == null)
         {
             Debug.LogError("[ChestShownUI] ChestPopupController.Instance is NULL! " +

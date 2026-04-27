@@ -163,6 +163,15 @@ public class PoliceCatchTrigger : MonoBehaviour
     /// <param name="reason">The source that triggered this request (for debugging).</param>
     public void RequestPoliceCatch(PoliceCatchReason reason)
     {
+        // Tutorial gating: police chase is fully suppressed until a future tutorial
+        // step unlocks it. Drop the request silently — no pending state, no counter.
+        if (TutorialGate.PoliceLocked)
+        {
+            if (enableDebugLogs)
+                Debug.Log($"[PoliceCatchTrigger] RequestPoliceCatch({reason}) IGNORED — tutorial PoliceLocked.");
+            return;
+        }
+
         // Guard: a chase is already running
         if (PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive)
         {

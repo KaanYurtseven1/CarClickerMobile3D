@@ -182,4 +182,25 @@ public class CardCollectionUI : MonoBehaviour
         foreach (var s in slots)
             s.Refresh();
     }
+
+    /// <summary>
+    /// Returns the active <see cref="CardSlotUI"/> displaying the given <paramref name="type"/>,
+    /// or null if no matching slot exists yet (e.g. <see cref="BuildSlots"/> hasn't run).
+    /// Used by the tutorial system to anchor pointer/click-restriction logic on the
+    /// card the player just earned from the first free chest.
+    /// </summary>
+    public CardSlotUI GetSlotForType(CardType type)
+    {
+        for (int i = 0; i < slots.Count; i++)
+        {
+            CardSlotUI s = slots[i];
+            if (s == null) continue;
+            CardDefinition def = s.Card;
+            if (def != null && def.type == type) return s;
+        }
+        return null;
+    }
+
+    /// <summary>Read-only access to the live slot list. Order matches <see cref="BuildSlots"/>.</summary>
+    public System.Collections.Generic.IReadOnlyList<CardSlotUI> Slots => slots;
 }

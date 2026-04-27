@@ -561,6 +561,11 @@ public class NitroRainController : MonoBehaviour
 
     private void SpawnRainNitroCoin()
     {
+        // Tutorial gating: rain must not produce coins until Nitro is unlocked,
+        // and never while gameplay is frozen by the tutorial.
+        if (!TutorialGate.NitroUnlocked || TutorialGate.GameplayFrozen)
+            return;
+
         // Guard: police chase active — skip rain spawns during minigame
         if (PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive)
             return;

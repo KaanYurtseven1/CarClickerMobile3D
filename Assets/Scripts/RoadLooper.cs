@@ -82,6 +82,11 @@ public class RoadLooper : MonoBehaviour
     {
         if (_slots == null || _slots.Length == 0) return;
 
+        // Tutorial gating: hold every road segment in place while the tutorial
+        // has frozen gameplay. Skipping movement also skips recycle naturally
+        // (segments cannot cross the recycle threshold while stationary).
+        if (TutorialGate.GameplayFrozen) return;
+
         float frameSpeed = CurrentSpeed;
 
         // 1) Move every slot toward the camera (–Z)

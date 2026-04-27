@@ -226,6 +226,14 @@ public class TapInputRaycaster : MonoBehaviour
 
         if (hit.collider.CompareTag("Car"))
         {
+            // Tutorial gating: while gameplay is frozen for the tutorial,
+            // car taps are completely suppressed (no economy reward, no scale
+            // feedback animation, no SFX). Only the tutorial Nitro Coin remains tappable.
+            if (TutorialGate.GameplayFrozen)
+            {
+                return;
+            }
+
             // ── Police chase tap isolation ──
             // During chase, car taps route to minigame only — no economy, no cards.
             // Visual feedback (scale + SFX) still fires so the player feels the tap.

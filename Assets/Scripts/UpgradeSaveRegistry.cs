@@ -60,6 +60,15 @@ public class UpgradeSaveRegistry : MonoBehaviour
     }
 
     /// <summary>
+    /// Clears all cached upgrade levels from memory.
+    /// Used by hard reset flows before a fresh scene reload.
+    /// </summary>
+    public void ClearAll()
+    {
+        _cache.Clear();
+    }
+
+    /// <summary>
     /// Returns true if the registry has any entries (i.e., upgrades have
     /// been registered at least once from the Main scene).
     /// </summary>

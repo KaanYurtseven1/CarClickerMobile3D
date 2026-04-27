@@ -55,6 +55,9 @@ public class Radar : MonoBehaviour
     {
         if (!isAlive) return;
 
+        // Tutorial gating: hold position while gameplay is frozen.
+        if (TutorialGate.GameplayFrozen) return;
+
         // Move in -Z to match road scroll direction
         transform.position += Vector3.back * CurrentSpeed * Time.deltaTime;
 

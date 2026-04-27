@@ -10,10 +10,18 @@ public class NitroCoin : MonoBehaviour
     /// </summary>
     public static event Action<int> OnWorldNitroCollected;
 
+    /// <summary>
+    /// Fired when a tutorial-tagged Nitro Coin crosses its configured Z-center threshold
+    /// (toward the camera). Used by <see cref="TutorialManager"/> to freeze gameplay and
+    /// start the idle bounce/zoom loop on the coin.
+    /// </summary>
+    public static event Action<NitroCoin> OnTutorialCoinReachedCenter;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStaticsNitroCoin()
     {
         OnWorldNitroCollected = null;
+        OnTutorialCoinReachedCenter = null;
     }
 
     [Header("Reward")]
@@ -70,6 +78,27 @@ public class NitroCoin : MonoBehaviour
     private float moveDirSign;
     private Rigidbody rb;
 
+    // ── Tutorial-mode state ──
+    /// <summary>True when this coin is the deterministic first tutorial coin.</summary>
+    public bool IsTutorial { get; private set; }
+    private float _tutorialFreezeZ;
+    private bool _tutorialCenterTriggered;
+    private Tween _tutorialBounceTween;
+    private Vector3 _tutorialBounceBaseScale;
+
+    /// <summary>
+    /// Marks this coin as the first tutorial coin. Spawner calls this immediately after Instantiate.
+    /// The coin will, on its way down, raise <see cref="OnTutorialCoinReachedCenter"/> when it
+    /// crosses <paramref name="freezeZ"/> toward the camera.
+    /// </summary>
+    public void MarkAsTutorialCoin(float freezeZ)
+    {
+        IsTutorial = true;
+        _tutorialFreezeZ = freezeZ;
+        _tutorialCenterTriggered = false;
+        TutorialGate.SetTutorialNitroActive(true);
+    }
+
     /// <summary>Guard flag: true once the coin has been collected (tap or magnet). Prevents double-collection.</summary>
     public bool IsCollected => isCollected;
 
@@ -115,6 +144,26 @@ public class NitroCoin : MonoBehaviour
 
     private void UpdateNormalMovement()
     {
+        // Tutorial gating: while gameplay is frozen the coin holds position.
+        // The tutorial coin runs its idle bounce tween (started on freeze enter);
+        // any other coin alive at freeze time simply waits.
+        if (TutorialGate.GameplayFrozen)
+            return;
+
+        // Tutorial coin: detect Z-center crossing once, then halt and notify.
+        if (IsTutorial && !_tutorialCenterTriggered)
+        {
+            bool crossed = (moveDirSign > 0f && transform.position.z >= _tutorialFreezeZ) ||
+                           (moveDirSign < 0f && transform.position.z <= _tutorialFreezeZ);
+            if (crossed)
+            {
+                _tutorialCenterTriggered = true;
+                StartTutorialBounce();
+                OnTutorialCoinReachedCenter?.Invoke(this);
+                return;
+            }
+        }
+
         float frameSpeed = CurrentSpeed;
         if (rb != null && rb.isKinematic)
         {
@@ -132,6 +181,38 @@ public class NitroCoin : MonoBehaviour
         {
             Destroy(gameObject);
         }
+    }
+
+    /// <summary>
+    /// Starts a subtle scale-pulse loop on the tutorial coin so the player
+    /// understands it must be tapped while gameplay is frozen. Uses unscaled
+    /// DOTween updates so it keeps animating regardless of any timeScale changes.
+    /// </summary>
+    private void StartTutorialBounce()
+    {
+        if (_tutorialBounceTween != null && _tutorialBounceTween.IsActive())
+            return;
+
+        _tutorialBounceBaseScale = transform.localScale;
+        Vector3 peak = _tutorialBounceBaseScale * 1.18f;
+
+        _tutorialBounceTween = transform
+            .DOScale(peak, 0.55f)
+            .SetEase(Ease.InOutSine)
+            .SetLoops(-1, LoopType.Yoyo)
+            .SetUpdate(true)
+            .SetLink(gameObject, LinkBehaviour.KillOnDestroy);
+    }
+
+    private void StopTutorialBounce()
+    {
+        if (_tutorialBounceTween != null)
+        {
+            _tutorialBounceTween.Kill();
+            _tutorialBounceTween = null;
+        }
+        if (_tutorialBounceBaseScale != Vector3.zero)
+            transform.localScale = _tutorialBounceBaseScale;
     }
 
     // ── DRIFT PHASE (Phase 1): short random drift near entry point ──
@@ -433,6 +514,9 @@ public class NitroCoin : MonoBehaviour
     {
         KillDriftTween();
         CleanupVFX();
+        StopTutorialBounce();
+        if (IsTutorial)
+            TutorialGate.SetTutorialNitroActive(false);
         // Immediate cleanup — no fade on destroy
         if (_glowController != null)
             _glowController.DisableGlowImmediate();

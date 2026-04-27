@@ -202,9 +202,26 @@ serve(async (req: Request) => {
       );
 
     if (upsertError) {
-      console.error("Upsert error:", upsertError);
+      console.error(
+        `[submit-score ${FUNCTION_VERSION}] leaderboard_scores upsert failed`,
+        {
+          message: upsertError.message,
+          code: upsertError.code,
+          details: upsertError.details,
+          hint: upsertError.hint,
+        },
+      );
       return new Response(
-        JSON.stringify({ ok: false, error: "Failed to save score" }),
+        JSON.stringify({
+          ok: false,
+          error: "Failed to save score",
+          db_error: {
+            message: upsertError.message,
+            code: upsertError.code,
+            details: upsertError.details,
+            hint: upsertError.hint,
+          },
+        }),
         { status: 500, headers: { "Content-Type": "application/json" } },
       );
     }

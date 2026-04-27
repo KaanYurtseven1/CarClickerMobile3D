@@ -37,6 +37,9 @@ public class CardSlotUI : MonoBehaviour
     private CardDefinition card;
     private System.Action<CardDefinition> onClick;
 
+    /// <summary>Card definition this slot is currently displaying. Null until <see cref="Setup"/> is called.</summary>
+    public CardDefinition Card => card;
+
     // ANIMATION ONLY: progress bar visual transition, logic unchanged
     private SegmentedProgressBarAnimator barAnimator;
 

@@ -178,6 +178,23 @@ public class ChestSessionManager : MonoBehaviour
         _activeSession.committedStickerIndex = package.stickerIndex;
         _activeSession.rewardsCommitted = true;
 
+        // ── Tutorial: remember the card type from the very first tutorial/free chest ──
+        // UI_Tutorial/Ten points to this exact card after the player returns to Main.
+        // Captured here because this is the only site that knows both "chest was
+        // tutorial-free" and the committed CardType, before the session is cleared.
+        if (_activeSession.chestData != null
+            && _activeSession.chestData.isTutorialFreeChest
+            && package.cardCopies > 0)
+        {
+            TutorialSaveData tsd = TutorialSaveData.Load();
+            if (tsd != null && tsd.firstFreeChestCardType < 0)
+            {
+                tsd.firstFreeChestCardType = (int)package.cardType;
+                tsd.Save();
+                Debug.Log($"[ChestSessionMgr][TutorialFree] Captured firstFreeChestCardType={package.cardType}");
+            }
+        }
+
         // 2) Apply rewards to in-memory singletons
         Debug.Log($"[ChestSessionMgr] CommitRewards: singletons alive? SaveSystem={(SaveSystem.Instance != null)} " +
                   $"CurrencyManager={(CurrencyManager.Instance != null)} CardManager={(CardManager.Instance != null)}");

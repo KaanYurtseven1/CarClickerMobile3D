@@ -359,4 +359,20 @@ public class BlacklistStatTracker : MonoBehaviour
         TotalMagnetCoinsCollected = PlayerPrefs.GetInt(KEY_MAGNET_COINS, 0);
         TotalTurboUses = PlayerPrefs.GetInt(KEY_TURBO, 0);
     }
+
+    /// <summary>
+    /// Clears all lifetime counters in memory for a true fresh-start reset.
+    /// Does not write PlayerPrefs (caller controls persistence timing).
+    /// </summary>
+    public void ResetCountersForFreshStart()
+    {
+        TotalWorldNitroCollected = 0;
+        TotalRadarsDefused = 0;
+        TotalChestsOpened = 0;
+        TotalBoostUses = 0;
+        TotalPoliceEscapes = 0;
+        TotalNitroRainTriggers = 0;
+        TotalMagnetCoinsCollected = 0;
+        TotalTurboUses = 0;
+    }
 }

@@ -1245,6 +1245,14 @@ public class PoliceCatchController : MonoBehaviour
             yield break;
         }
 
+        // Tutorial gating: reward Nitro Coins must not appear until Nitro is unlocked.
+        // (Police chase itself is already gated upstream by TutorialGate.PoliceLocked,
+        // but this stays defensive in case a future flow allows chases pre-unlock.)
+        if (!TutorialGate.NitroUnlocked)
+        {
+            yield break;
+        }
+
         int coinsToSpawn = GetStageScaledRewardCoins();
 
         for (int i = 0; i < coinsToSpawn; i++)

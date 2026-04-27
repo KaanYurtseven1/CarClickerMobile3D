@@ -34,6 +34,9 @@ public class ChestMover : MonoBehaviour
     {
         if (bottomTarget == null) return;
 
+        // Tutorial gating: hold position while gameplay is frozen.
+        if (TutorialGate.GameplayFrozen) return;
+
         // Her frame'de kendi Y'ni kilitle
         Vector3 current = transform.position;
         current.y = fixedY;

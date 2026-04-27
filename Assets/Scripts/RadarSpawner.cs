@@ -37,6 +37,10 @@ public class RadarSpawner : MonoBehaviour
         if (radarPrefab == null) return;
         if (spawnPointLeft == null && spawnPointRight == null) return;
 
+        // Tutorial gating: Radar spawning is locked until a future tutorial step unlocks it.
+        if (!TutorialGate.RadarUnlocked || TutorialGate.GameplayFrozen)
+            return;
+
         // UI content-panel suppression: freeze timer while a panel is open.
         // When the panel closes the timer resumes — no burst-spawn.
         if (UIFlowState.IsSpawnSuppressed)

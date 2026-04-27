@@ -24,12 +24,28 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System;
 using System.Collections.Generic;
 using DG.Tweening;
 
 public class CardDetailPopupController : MonoBehaviour
 {
     public static CardDetailPopupController Instance;
+
+    /// <summary>
+    /// Raised at the start of <see cref="Show"/> after the duplicate-open guard,
+    /// once per popup invocation. Subscribers are responsible for null-guarding the
+    /// <see cref="CardDefinition"/> argument (it is always non-null when raised).
+    /// Used by the tutorial system to dismiss UI_Tutorial/Ten when the player taps
+    /// the earned card.
+    /// </summary>
+    public static event Action<CardDefinition> OnShown;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticEvents()
+    {
+        OnShown = null;
+    }
 
     // ── Root ─────────────────────────────────────────────────────────────
     [Header("Root")]
@@ -166,6 +182,10 @@ public class CardDetailPopupController : MonoBehaviour
         if (isAnimating || IsOpen) return;
 
         currentCard = def;
+
+        // Notify listeners (tutorial, analytics, etc.) that a card popup is opening.
+        try { OnShown?.Invoke(def); }
+        catch (System.Exception ex) { Debug.LogException(ex); }
 
         Debug.Log($"[CardDetailPopup] Showing card: {def.displayName} (Type: {def.type})");
 

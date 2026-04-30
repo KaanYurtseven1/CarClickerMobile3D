@@ -12,6 +12,14 @@ public class CardCollectionUI : MonoBehaviour
     public GameObject groupFound;      // Group_Found (tam grup, header + grid)
     public GameObject groupNotFound;   // Group_NotFound (tam grup, header + grid)
 
+    [Header("Flicker Guard")]
+    [Tooltip("Optional CanvasGroup on the Cards content (e.g. ScrollView_Cards/Viewport/Content). " +
+             "If assigned, alpha is forced to 0 at the start of BuildSlots and back to 1 after the " +
+             "rebuild + layout completes — prevents the 1-frame 'all colored → some grey' flicker on " +
+             "first Cards tab open while leftover placeholder/stale children are still queued for " +
+             "deferred Destroy.")]
+    [SerializeField] private CanvasGroup contentCanvasGroup;
+
     [Header("Prefab")]
     public CardSlotUI cardSlotPrefab;
 
@@ -81,6 +89,12 @@ public class CardCollectionUI : MonoBehaviour
             return;
         }
 
+        // Flicker guard: hide content while we tear down + repopulate slots so the
+        // user never sees stale colored placeholders or the prefab's default colored
+        // state for a single frame before Setup/Refresh applies the locked sprite.
+        if (contentCanvasGroup != null)
+            contentCanvasGroup.alpha = 0f;
+
         // Eski çocukları temizle
         ClearChildren(foundRoot);
         ClearChildren(notFoundRoot);
@@ -120,6 +134,10 @@ public class CardCollectionUI : MonoBehaviour
 
         // Force layout rebuild to ensure UI updates immediately
         ForceLayoutRebuild();
+
+        // Reveal content now that every slot has Setup/Refresh + layout applied.
+        if (contentCanvasGroup != null)
+            contentCanvasGroup.alpha = 1f;
     }
 
     private void ForceLayoutRebuild()
@@ -142,9 +160,26 @@ public class CardCollectionUI : MonoBehaviour
     {
         if (root == null) return;
 
-        for (int i = root.childCount - 1; i >= 0; i--)
+        int childCount = root.childCount;
+        if (childCount > 0)
         {
-            Destroy(root.GetChild(i).gameObject);
+            // Authored placeholders / stale slots from a previous BuildSlots are
+            // expected to be cleared here. Warn so designers can audit
+            // Grid_Found / Grid_NotFound in the Editor — any authored CardSlot
+            // children would also have shown up briefly with the prefab's
+            // default colored visuals on first Cards tab open.
+            Debug.LogWarning($"[CardCollectionUI] ClearChildren: found {childCount} pre-existing child(ren) under '{root.name}'. " +
+                             "If this fires on the FIRST BuildSlots after scene load, there are authored placeholder " +
+                             "slots in the scene — inspect Grid_Found/Grid_NotFound in the Hierarchy and remove them.");
+        }
+
+        for (int i = childCount - 1; i >= 0; i--)
+        {
+            GameObject child = root.GetChild(i).gameObject;
+            // Force-deactivate BEFORE Destroy so Unity's deferred (end-of-frame)
+            // destruction cannot render the stale child for one more frame.
+            if (child.activeSelf) child.SetActive(false);
+            Destroy(child);
         }
     }
 

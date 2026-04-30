@@ -38883,6 +38883,7 @@ GameObject:
   - component: {fileID: 1344414122}
   - component: {fileID: 1344414124}
   - component: {fileID: 1344414123}
+  - component: {fileID: 1344414125}
   m_Layer: 5
   m_Name: Content_Cards
   m_TagString: Untagged
@@ -38951,6 +38952,18 @@ MonoBehaviour:
   m_ChildScaleWidth: 0
   m_ChildScaleHeight: 0
   m_ReverseArrangement: 0
+--- !u!225 &1344414125
+CanvasGroup:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1344414121}
+  m_Enabled: 1
+  m_Alpha: 1
+  m_Interactable: 1
+  m_BlocksRaycasts: 1
+  m_IgnoreParentGroups: 0
 --- !u!1 &1350866963
 GameObject:
   m_ObjectHideFlags: 0
@@ -57743,6 +57756,7 @@ MonoBehaviour:
   notFoundRoot: {fileID: 987186688}
   groupFound: {fileID: 688599082}
   groupNotFound: {fileID: 2131744817}
+  contentCanvasGroup: {fileID: 1344414125}
   cardSlotPrefab: {fileID: 6074371419216338013, guid: 05b57e98801d58548a0c8f3c224fff3e, type: 3}
   cardDetailPopup: {fileID: 2083773434}
 --- !u!114 &1937700139
@@ -59412,7 +59426,7 @@ MonoBehaviour:
   minSpawnInterval: 8
   maxSpawnInterval: 18
   maxAliveRadars: 1
-  radarTutorialFreezeZ: -2
+  radarTutorialFreezeZ: 0
 --- !u!4 &2028230230
 Transform:
   m_ObjectHideFlags: 0

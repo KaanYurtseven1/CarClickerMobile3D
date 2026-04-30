@@ -6,6 +6,10 @@ using UnityEngine.UI;
 
 public class TutorialManager : MonoBehaviour
 {
+    /// <summary>Scene-scoped singleton. Used by post-tutorial hooks
+    /// (e.g. <see cref="BlacklistPanelController"/>) to notify the manager
+    /// of one-time UI events without scene-search overhead.</summary>
+    public static TutorialManager Instance { get; private set; }
     [Header("Tutorial Objects")]
     [SerializeField] private GameObject tutorialRoot;
     [SerializeField] private GameObject dim;
@@ -38,6 +42,40 @@ public class TutorialManager : MonoBehaviour
     [SerializeField] private float nineOpenDelay = 0.25f;
     [Tooltip("Delay before showing UI_Tutorial/Ten after Cards tab opens (allows BuildSlots to run).")]
     [SerializeField] private float tenOpenDelay = 0.25f;
+
+    [Header("Steps 14–19 — Radar / Police Tutorial")]
+    [Tooltip("World RadarSpawner used to deterministically force-spawn the first tutorial Radar after the 3rd free Common Chest is opened.")]
+    [SerializeField] private RadarSpawner radarSpawner;
+    [Tooltip("PoliceCatchTrigger reference used to deterministically start the tutorial police chase. Optional — falls back to PoliceCatchTrigger.Instance.")]
+    [SerializeField] private PoliceCatchTrigger policeCatchTrigger;
+    [Tooltip("PopularityBar GameObject in the TopBar revealed at Step 14 with the same animation as Premium reveal.")]
+    [SerializeField] private GameObject popularityBarRoot;
+    [Tooltip("UI_Tutorial/Eleven dialog GameObject — shown together with Twelve after the player taps the tutorial Radar.")]
+    [SerializeField] private GameObject eleven;
+    [Tooltip("UI_Tutorial/Twelve pointer GameObject — shown together with Eleven after the player taps the tutorial Radar.")]
+    [SerializeField] private GameObject twelve;
+    [Tooltip("UI_Tutorial/Thirteen dialog GameObject — shown the moment the tutorial police chase starts (OnChaseStarted).")]
+    [SerializeField] private GameObject thirteen;
+    [Tooltip("Delay before opening Eleven/Twelve after the player taps the tutorial Radar.")]
+    [SerializeField] private float elevenTwelveOpenDelay = 0.4f;
+    [Tooltip("Delay between dismissing Eleven/Twelve and force-starting the tutorial police chase.")]
+    [SerializeField] private float policeTutorialStartDelay = 0.4f;
+
+    [Header("Steps 20–22 — Garage Tutorial")]
+    [Tooltip("TopBar/Btn_Garage GameObject — hidden until Step 19 completes, then animated in. MUST also be present in 'Top Bar Initially Hidden' so it stays hidden through earlier steps.")]
+    [SerializeField] private GameObject btnGarageRoot;
+    [Tooltip("TopBar/Btn_Garage Button — Step 21 listener target. The existing GarageSceneLoader.LoadGarageScene UnityEvent listener is left intact and runs alongside.")]
+    [SerializeField] private Button btnGarage;
+    [Tooltip("UI_Tutorial/Fourteen pointer GameObject — finger pointer aimed at TopBar/Btn_Garage during Step 20.")]
+    [SerializeField] private GameObject fourteen;
+    [Tooltip("Optional UI_Tutorial/FourteenInputBlocker GameObject — transparent full-screen Image that catches all raycasts during Step 20 EXCEPT Btn_Garage. Ensure its sibling-index is below Btn_Garage's parent so Btn_Garage stays clickable. If null, a CanvasGroup-based fallback is not provided — leave only Btn_Garage interactable manually.")]
+    [SerializeField] private GameObject fourteenInputBlocker;
+    [Tooltip("Delay before Btn_Garage reveal + Fourteen open after Step 19 (Thirteen dismissed) finishes.")]
+    [SerializeField] private float garageTutorialOpenDelay = 0.4f;
+
+    [Header("Post-Tutorial — First Blacklist Visit")]
+    [Tooltip("UI_Tutorial/Seventeen dialog GameObject — shown the first time Panel_BlackList opens after the Garage tutorial completes (TutorialGate.BottomBarFullyUnlocked && !blacklistTutorialShown). Tap-anywhere to dismiss; uses Dim. Authored RectTransform position/scale are preserved.")]
+    [SerializeField] private GameObject seventeen;
 
     [Header("Step 6/7 — Nitro/Chest Unlock Phase")]
     [Tooltip("Reference to the world NitroCoinSpawner used to force-spawn the first tutorial coin.")]
@@ -212,6 +250,67 @@ public class TutorialManager : MonoBehaviour
     // for Step 10 — keyed by reference so we can fully restore on completion.
     private System.Collections.Generic.List<UnityEngine.UI.Button> _stepTenSuppressedSlotButtons;
 
+    // ── Steps 14–19 (Radar/Police tutorial) runtime state ──
+    private bool _isAwaitingTutorialRadarSpawn;
+    private bool _isStepSixteenActive;
+    private bool _isStepSixteenCompletionInProgress;
+    private bool _canDismissEleven;
+    private bool _isAwaitingTutorialChase;
+    private bool _isStepEighteenActive;
+    private bool _isStepEighteenCompletionInProgress;
+    private bool _canDismissThirteen;
+    private CanvasGroup _elevenCanvasGroup;
+    private CanvasGroup _twelveCanvasGroup;
+    private CanvasGroup _thirteenCanvasGroup;
+    private CanvasGroup _popularityBarCanvasGroup;
+    private RectTransform _elevenRectTransform;
+    private RectTransform _twelveRectTransform;
+    private RectTransform _thirteenRectTransform;
+    private RectTransform _popularityBarRectTransform;
+    private Vector3 _elevenOriginalScale = Vector3.one;
+    private Vector2 _elevenOriginalAnchoredPosition;
+    private bool _elevenOriginalTransformCached;
+    private Vector3 _twelveOriginalScale = Vector3.one;
+    private Vector2 _twelveOriginalAnchoredPosition;
+    private bool _twelveOriginalTransformCached;
+    private Vector3 _thirteenOriginalScale = Vector3.one;
+    private Vector2 _thirteenOriginalAnchoredPosition;
+    private bool _thirteenOriginalTransformCached;
+    private Vector3 _popularityBarOriginalScale = Vector3.one;
+    private bool _popularityBarOriginalTransformCached;
+    private Sequence _stepTwelveLoopSequence;
+
+    // ── Steps 20–22 (Garage tutorial) runtime state ──
+    private bool _isGarageButtonListenerRegistered;
+    /// <summary>True between Thirteen-dismissed (CompleteStepEighteen) and the
+    /// next OnChaseEnded+TopBar-restored. Gates EnterGarageTutorial so Fourteen
+    /// can never appear while a chase is running.</summary>
+    private bool _isAwaitingGarageTutorialAfterChase;
+    private Coroutine _garageTutorialAfterChaseCoroutine;
+    /// <summary>[DIAG TEMP] Cached Btn_Garage activeSelf for the runtime watcher in Update.</summary>
+    private bool _btnGarageWatcherLastActiveSelf;
+    private bool _btnGarageWatcherInitialized;
+    private CanvasGroup _btnGarageCanvasGroup;
+    private RectTransform _btnGarageRectTransform;
+    private Vector3 _btnGarageOriginalScale = Vector3.one;
+    private bool _btnGarageOriginalTransformCached;
+    private CanvasGroup _fourteenCanvasGroup;
+    private RectTransform _fourteenRectTransform;
+    private Vector3 _fourteenOriginalScale = Vector3.one;
+    private Vector2 _fourteenOriginalAnchoredPosition;
+    private bool _fourteenOriginalTransformCached;
+    private Sequence _stepFourteenLoopSequence;
+
+    // ── Step Seventeen (post-tutorial first-Blacklist dialog) ──
+    private CanvasGroup _seventeenCanvasGroup;
+    private RectTransform _seventeenRectTransform;
+    private Vector3 _seventeenOriginalScale = Vector3.one;
+    private Vector2 _seventeenOriginalAnchoredPosition;
+    private bool _seventeenOriginalTransformCached;
+    private bool _isStepSeventeenActive;
+    private bool _isStepSeventeenCompletionInProgress;
+    private bool _canDismissSeventeen;
+
     // ── Active-car animator pause state (Step 6 freeze) ──
     private Animator _frozenCarAnimator;
     private float _frozenCarAnimatorPriorSpeed;
@@ -227,8 +326,22 @@ public class TutorialManager : MonoBehaviour
         if (tutorialRoot == null)
             tutorialRoot = gameObject;
 
+        // Scene-scoped singleton. Last-loaded wins is fine here because the
+        // scene only ever instantiates one TutorialManager per scene; if a
+        // duplicate slips in we still keep the most recent reference and
+        // the previous instance's OnDestroy will clear Instance only if it
+        // is still the current owner (see OnDestroy guard).
+        Instance = this;
+
         _saveData = TutorialSaveData.Load();
         TutorialGate.SyncFromSave(_saveData);
+        // [GarageDebug] Lifecycle: Awake start. Capture initial scene state of Btn_Garage.
+        Debug.Log($"[Lifecycle][GarageDebug] TutorialManager Awake. btnGarageRoot={(btnGarageRoot != null ? btnGarageRoot.name : "<null>")} active={(btnGarageRoot != null && btnGarageRoot.activeSelf)} stepIdx={_saveData.currentStepIndex} " +
+                  $"nitroUnlocked={_saveData.nitroUnlocked} radarUnlocked={_saveData.radarUnlocked} thirteenDismissed={_saveData.thirteenDismissed} garageTutorialQueued={_saveData.garageTutorialQueued} fifteenDismissed={_saveData.fifteenDismissed}");
+        if (btnGarageRoot != null && btnGarageRoot.activeSelf && !ShouldBtnGarageBeVisible())
+        {
+            Debug.LogWarning("[STACK][GarageDebug] Btn_Garage was already ACTIVE in scene at TutorialManager.Awake (before any code touched it).\n" + System.Environment.StackTrace);
+        }
         _dimCanvasGroup = GetOrAddCanvasGroup(dim);
         _twoCanvasGroup = GetOrAddCanvasGroup(two);
         _threeCanvasGroup = GetOrAddCanvasGroup(three);
@@ -356,6 +469,108 @@ public class TutorialManager : MonoBehaviour
             ten.SetActive(false);
         }
 
+        // Steps 14–19: Eleven / Twelve / Thirteen + PopularityBar reveal cache.
+        if (eleven != null)
+        {
+            _elevenCanvasGroup = GetOrAddCanvasGroup(eleven);
+            _elevenRectTransform = eleven.GetComponent<RectTransform>();
+            CacheStepElevenOriginalTransform();
+            if (_elevenCanvasGroup != null)
+            {
+                _elevenCanvasGroup.interactable = false;
+                _elevenCanvasGroup.blocksRaycasts = false;
+                _elevenCanvasGroup.alpha = 0f;
+            }
+            eleven.SetActive(false);
+        }
+
+        if (twelve != null)
+        {
+            _twelveCanvasGroup = GetOrAddCanvasGroup(twelve);
+            _twelveRectTransform = twelve.GetComponent<RectTransform>();
+            CacheStepTwelveOriginalTransform();
+            if (_twelveCanvasGroup != null)
+            {
+                _twelveCanvasGroup.interactable = false;
+                _twelveCanvasGroup.blocksRaycasts = false;
+                _twelveCanvasGroup.alpha = 0f;
+            }
+            Image twelveImage = twelve.GetComponent<Image>();
+            if (twelveImage != null)
+                twelveImage.raycastTarget = false;
+            twelve.SetActive(false);
+        }
+
+        if (thirteen != null)
+        {
+            _thirteenCanvasGroup = GetOrAddCanvasGroup(thirteen);
+            _thirteenRectTransform = thirteen.GetComponent<RectTransform>();
+            CacheStepThirteenOriginalTransform();
+            if (_thirteenCanvasGroup != null)
+            {
+                _thirteenCanvasGroup.interactable = false;
+                _thirteenCanvasGroup.blocksRaycasts = false;
+                _thirteenCanvasGroup.alpha = 0f;
+            }
+            thirteen.SetActive(false);
+        }
+
+        if (popularityBarRoot != null)
+        {
+            _popularityBarCanvasGroup = GetOrAddCanvasGroup(popularityBarRoot);
+            _popularityBarRectTransform = popularityBarRoot.GetComponent<RectTransform>();
+            CachePopularityBarOriginalTransform();
+        }
+
+        // Steps 20–22: Btn_Garage + Fourteen reveal cache.
+        if (btnGarageRoot != null)
+        {
+            _btnGarageCanvasGroup = GetOrAddCanvasGroup(btnGarageRoot);
+            _btnGarageRectTransform = btnGarageRoot.GetComponent<RectTransform>();
+            CacheBtnGarageOriginalTransform();
+            // Defensive: ensure Btn_Garage starts hidden until the police tutorial
+            // has fully completed (post-chase). Even if a designer left it active
+            // in the scene, ApplyBtnGarageGateVisibility will pull it offline.
+            bool wasActive = btnGarageRoot.activeSelf;
+            btnGarageRoot.SetActive(false);
+            Debug.Log($"[TutorialMgr][GarageDebug] Setting Btn_Garage INACTIVE (Awake forced-off). wasActive={wasActive}");
+        }
+        if (fourteen != null)
+        {
+            _fourteenCanvasGroup = GetOrAddCanvasGroup(fourteen);
+            _fourteenRectTransform = fourteen.GetComponent<RectTransform>();
+            CacheStepFourteenOriginalTransform();
+            if (_fourteenCanvasGroup != null)
+            {
+                _fourteenCanvasGroup.interactable = false;
+                _fourteenCanvasGroup.blocksRaycasts = false;
+                _fourteenCanvasGroup.alpha = 0f;
+            }
+            Image fourteenImage = fourteen.GetComponent<Image>();
+            if (fourteenImage != null)
+                fourteenImage.raycastTarget = false;
+            fourteen.SetActive(false);
+        }
+        if (fourteenInputBlocker != null)
+            fourteenInputBlocker.SetActive(false);
+
+        // Step Seventeen — first-Blacklist dialog. Cache transform + CanvasGroup
+        // and force-hide so it cannot intercept raycasts behind ChestPopup or
+        // other UI before being explicitly shown.
+        if (seventeen != null)
+        {
+            _seventeenCanvasGroup = GetOrAddCanvasGroup(seventeen);
+            _seventeenRectTransform = seventeen.GetComponent<RectTransform>();
+            CacheStepSeventeenOriginalTransform();
+            if (_seventeenCanvasGroup != null)
+            {
+                _seventeenCanvasGroup.interactable = false;
+                _seventeenCanvasGroup.blocksRaycasts = false;
+                _seventeenCanvasGroup.alpha = 0f;
+            }
+            seventeen.SetActive(false);
+        }
+
         if (_dimCanvasGroup != null)
         {
             _dimCanvasGroup.interactable = false;
@@ -363,8 +578,15 @@ public class TutorialManager : MonoBehaviour
         }
     }
 
+    private void OnDestroy()
+    {
+        if (Instance == this)
+            Instance = null;
+    }
+
     private void OnEnable()
     {
+        Debug.Log($"[Lifecycle][GarageDebug] TutorialManager OnEnable. btnGarageRoot active={(btnGarageRoot != null && btnGarageRoot.activeSelf)}");
         SaveSystem.OnGameLoaded += HandleGameLoaded;
         NitroCoin.OnTutorialCoinReachedCenter += HandleTutorialCoinReachedCenter;
         NitroCoin.OnWorldNitroCollected += HandleWorldNitroCollected;
@@ -375,6 +597,10 @@ public class TutorialManager : MonoBehaviour
         ChestInventoryManager.OnChestRemovedAfterOpen += HandleChestRemovedAfterOpen;
         CardDetailPopupController.OnShown += HandleCardDetailPopupShownForStepTen;
         _isCardDetailPopupListenerRegistered = true;
+        Radar.OnTutorialRadarReachedCenter += HandleTutorialRadarReachedCenter;
+        Radar.OnTutorialRadarTapped += HandleTutorialRadarTapped;
+        PoliceCatchController.OnChaseStarted += HandleChaseStartedForTutorial;
+        PoliceCatchController.OnChaseEnded += HandleChaseEndedForGarageTutorial;
     }
 
     private void OnDisable()
@@ -392,6 +618,10 @@ public class TutorialManager : MonoBehaviour
             CardDetailPopupController.OnShown -= HandleCardDetailPopupShownForStepTen;
             _isCardDetailPopupListenerRegistered = false;
         }
+        Radar.OnTutorialRadarReachedCenter -= HandleTutorialRadarReachedCenter;
+        Radar.OnTutorialRadarTapped -= HandleTutorialRadarTapped;
+        PoliceCatchController.OnChaseStarted -= HandleChaseStartedForTutorial;
+        PoliceCatchController.OnChaseEnded -= HandleChaseEndedForGarageTutorial;
         UnregisterShopCardsCardsTutorialListener();
         UnregisterCardsTabCardsTutorialListener();
         UnregisterResumePipelineClickerListener();
@@ -424,12 +654,74 @@ public class TutorialManager : MonoBehaviour
 
     private void Start()
     {
+        Debug.Log($"[Lifecycle][GarageDebug] TutorialManager Start. btnGarageRoot active={(btnGarageRoot != null && btnGarageRoot.activeSelf)}");
         // Also evaluate once at startup in case this script activates after load.
         ApplyTutorialState();
     }
 
+    /// <summary>[DIAG TEMP] Evaluates whether Btn_Garage SHOULD be visible right now.</summary>
+    private bool ShouldBtnGarageBeVisible()
+    {
+        if (_saveData == null) return false;
+        bool chaseActive = PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive;
+        bool policeDone = _saveData.thirteenDismissed && !_isAwaitingGarageTutorialAfterChase && !chaseActive;
+        bool garageUnlocked = _saveData.garageTutorialQueued || _saveData.fifteenDismissed;
+        return garageUnlocked && policeDone;
+    }
+
     private void Update()
     {
+        // Step Seventeen — post-tutorial first-Blacklist dialog tap-anywhere.
+        // Handled BEFORE all other step branches so it can dismiss while normal
+        // gameplay is otherwise unblocked. Independent from the main tutorial
+        // step state machine — it only runs after fifteenDismissed=true.
+        if (_isStepSeventeenActive)
+        {
+            if (_isStepSeventeenCompletionInProgress || !_canDismissSeventeen)
+                return;
+
+            if (WasAnyPointerPressedThisFrame())
+                CompleteStepSeventeen();
+
+            return;
+        }
+
+        // [WATCH][GarageDebug] Runtime watcher — fires only on activeSelf edges.
+        if (btnGarageRoot != null)
+        {
+            bool nowActive = btnGarageRoot.activeSelf;
+            if (!_btnGarageWatcherInitialized)
+            {
+                _btnGarageWatcherLastActiveSelf = nowActive;
+                _btnGarageWatcherInitialized = true;
+            }
+            else if (nowActive != _btnGarageWatcherLastActiveSelf)
+            {
+                bool shouldBeVisible = ShouldBtnGarageBeVisible();
+                int stepIdx = _saveData != null ? _saveData.currentStepIndex : -1;
+                bool policeDone = _saveData != null && _saveData.thirteenDismissed && !_isAwaitingGarageTutorialAfterChase && (PoliceCatchController.Instance == null || !PoliceCatchController.Instance.IsChaseActive);
+                bool garageUnlocked = _saveData != null && (_saveData.garageTutorialQueued || _saveData.fifteenDismissed);
+                bool radarDone = _saveData != null && _saveData.radarUnlocked;
+                if (nowActive)
+                {
+                    if (!shouldBeVisible)
+                    {
+                        Debug.LogWarning($"[WATCH][GarageDebug] Btn_Garage became ACTIVE at runtime UNEXPECTEDLY! stepIdx={stepIdx} policeDone={policeDone} radarDone={radarDone} garageUnlocked={garageUnlocked} frame={Time.frameCount} time={Time.unscaledTime:F2}");
+                        Debug.Log("[STACK][GarageDebug] Btn_Garage activated\n" + System.Environment.StackTrace);
+                    }
+                    else
+                    {
+                        Debug.Log($"[WATCH][GarageDebug] Btn_Garage became ACTIVE (expected). stepIdx={stepIdx} policeDone={policeDone} radarDone={radarDone} garageUnlocked={garageUnlocked} frame={Time.frameCount} time={Time.unscaledTime:F2}");
+                    }
+                }
+                else
+                {
+                    Debug.Log($"[WATCH][GarageDebug] Btn_Garage became INACTIVE. stepIdx={stepIdx} policeDone={policeDone} radarDone={radarDone} garageUnlocked={garageUnlocked} frame={Time.frameCount} time={Time.unscaledTime:F2}");
+                }
+                _btnGarageWatcherLastActiveSelf = nowActive;
+            }
+        }
+
         if (_isStepFourPendingStart)
             TryStartStepFourPending();
 
@@ -442,6 +734,35 @@ public class TutorialManager : MonoBehaviour
         // spawn a single tutorial Common Chest as soon as the world is in a safe state.
         if (_isAwaitingTutorialChestSpawn)
             TryForceSpawnTutorialChest();
+
+        // Steps 14–19 polling.
+        if (_isAwaitingTutorialRadarSpawn)
+            TryForceSpawnTutorialRadar();
+
+        if (_isAwaitingTutorialChase)
+            TryForceTutorialChase();
+
+        if (_isStepSixteenActive)
+        {
+            if (_isStepSixteenCompletionInProgress || _isTransitionInProgress || !_canDismissEleven)
+                return;
+
+            if (WasAnyPointerPressedThisFrame())
+                CompleteStepSixteen();
+
+            return;
+        }
+
+        if (_isStepEighteenActive)
+        {
+            if (_isStepEighteenCompletionInProgress || _isTransitionInProgress || !_canDismissThirteen)
+                return;
+
+            if (WasAnyPointerPressedThisFrame())
+                CompleteStepEighteen();
+
+            return;
+        }
 
         if (_isStepSevenActive)
         {
@@ -489,6 +810,12 @@ public class TutorialManager : MonoBehaviour
     {
         _saveData = TutorialSaveData.Load();
         TutorialGate.SyncFromSave(_saveData);
+        // [Save][GarageDebug] Snapshot of garage-relevant flags after load.
+        Debug.Log($"[Save][GarageDebug] After Load: stepIndex={_saveData.currentStepIndex} " +
+                  $"nitroUnlocked={_saveData.nitroUnlocked} radarUnlocked={_saveData.radarUnlocked} " +
+                  $"policeTutorialChaseStarted={_saveData.policeTutorialChaseStarted} thirteenDismissed={_saveData.thirteenDismissed} " +
+                  $"garageTutorialQueued={_saveData.garageTutorialQueued} garageButtonClicked={_saveData.garageButtonClicked} fifteenDismissed={_saveData.fifteenDismissed} " +
+                  $"btnGarageRoot.activeSelf={(btnGarageRoot != null && btnGarageRoot.activeSelf)}");
         // [DEBUG][CardsTut] Trace what state we just loaded.
         Debug.Log($"[TutorialMgr][CardsTut] HandleGameLoaded: stepIdx={_saveData.currentStepIndex} " +
                   $"chestUnlocked={_saveData.chestUnlocked} tutorialChestCollected={_saveData.tutorialChestCollected} " +
@@ -496,6 +823,12 @@ public class TutorialManager : MonoBehaviour
                   $"cardsTutStarted={_saveData.cardsTutorialStarted} shopCardsAfterFirst={_saveData.shopCardsClickedAfterFirstChest} " +
                   $"cardsTabClicked={_saveData.cardsTabClicked} tenCompleted={_saveData.tenCompleted} " +
                   $"clickerPressed={_saveData.cardsSegmentClickerPressed}");
+        Debug.Log($"[TutorialMgr][RadarTut] HandleGameLoaded radar/police flags: stepIdx={_saveData.currentStepIndex} " +
+                  $"freeOpenedCount={_saveData.tutorialFreeChestOpenedCount} radarTutorialQueued={_saveData.radarTutorialQueued} " +
+                  $"firstTutorialRadarSpawned={_saveData.firstTutorialRadarSpawned} radarTutorialTapped={_saveData.radarTutorialTapped} " +
+                  $"elevenTwelveDismissed={_saveData.elevenTwelveDismissed} policeTutorialChaseStarted={_saveData.policeTutorialChaseStarted} " +
+                  $"thirteenDismissed={_saveData.thirteenDismissed} radarUnlocked={_saveData.radarUnlocked} policeLocked={_saveData.policeLocked} " +
+                  $"radarSpawnerAssigned={(radarSpawner != null)} popularityBarRootAssigned={(popularityBarRoot != null)}");
         ApplyTutorialState();
     }
 
@@ -664,6 +997,10 @@ public class TutorialManager : MonoBehaviour
     {
         SetBottomBarHiddenImmediate();
 
+        bool btnGarageActiveBefore = btnGarageRoot != null && btnGarageRoot.activeSelf;
+        Debug.Log($"[TutorialMgr][GarageDebug] ApplyStepOneUILock ENTER. StepIndex={(_saveData != null ? _saveData.currentStepIndex : -1)}, policeDone={(_saveData != null && _saveData.thirteenDismissed)}, radarDone={(_saveData != null && _saveData.radarUnlocked)}, garageUnlocked={(_saveData != null && (_saveData.garageTutorialQueued || _saveData.fifteenDismissed))}");
+        Debug.Log($"[TutorialMgr][GarageDebug] ApplyStepOneUILock Btn_Garage activeBefore={btnGarageActiveBefore}");
+
         if (topBarAlwaysActive != null)
         {
             for (int i = 0; i < topBarAlwaysActive.Length; i++)
@@ -676,6 +1013,16 @@ public class TutorialManager : MonoBehaviour
         if (topBarInitiallyHidden != null)
         {
             bool nitroUnlocked = _saveData != null && _saveData.nitroUnlocked;
+            bool radarUnlocked = _saveData != null && _saveData.radarUnlocked;
+            // Btn_Garage must remain hidden until the tutorial police chase has
+            // fully completed (Thirteen dismissed AND chase ended AND topbar
+            // restored). garageTutorialQueued alone (set the moment Thirteen is
+            // dismissed) is NOT a sufficient unlock condition — the chase is
+            // still running at that moment.
+            bool garageRevealed = _saveData != null
+                                  && _saveData.garageTutorialQueued
+                                  && !_isAwaitingGarageTutorialAfterChase
+                                  && (PoliceCatchController.Instance == null || !PoliceCatchController.Instance.IsChaseActive);
             for (int i = 0; i < topBarInitiallyHidden.Length; i++)
             {
                 if (topBarInitiallyHidden[i] == null)
@@ -686,9 +1033,22 @@ public class TutorialManager : MonoBehaviour
                 if (nitroUnlocked && premiumRoot != null && topBarInitiallyHidden[i] == premiumRoot)
                     continue;
 
+                // Once the radar tutorial has revealed the PopularityBar, keep it visible.
+                if (radarUnlocked && popularityBarRoot != null && topBarInitiallyHidden[i] == popularityBarRoot)
+                    continue;
+
+                // Only skip the deactivate for Btn_Garage when the police tutorial
+                // is fully complete — otherwise force-hide it here.
+                if (garageRevealed && btnGarageRoot != null && topBarInitiallyHidden[i] == btnGarageRoot)
+                    continue;
+
                 topBarInitiallyHidden[i].SetActive(false);
             }
         }
+
+        // Final authoritative gate — always force Btn_Garage to the correct state.
+        ApplyBtnGarageGateVisibility("ApplyStepOneUILock");
+        Debug.Log($"[TutorialMgr][GarageDebug] ApplyStepOneUILock EXIT Btn_Garage activeAfter={(btnGarageRoot != null && btnGarageRoot.activeSelf)}");
     }
 
     private void SetStepOneVisibleAnimated(bool visible)
@@ -976,6 +1336,13 @@ public class TutorialManager : MonoBehaviour
         bottomBarRoot.SetActive(false);
     }
 
+    // Tracks last-applied state per BottomBar gated button so we can emit
+    // transition-only logs (locked → unlocked / unlocked → locked) instead of
+    // spamming every call. Nullable: null = no state ever applied yet.
+    private bool? _bankBottomBarLastInteractable;
+    private bool? _blacklistBottomBarLastInteractable;
+    private bool? _rankingBottomBarLastInteractable;
+
     private void ApplyBottomBarInteractabilityLock()
     {
         // During the post-first-free-chest Cards tutorial sub-steps the player
@@ -989,9 +1356,44 @@ public class TutorialManager : MonoBehaviour
         SetButtonInteractable(shopAndCardsButton, true);
         SetButtonInteractable(clickerButton, !clickerLockedForCardsSegment);
 
-        SetButtonInteractable(bankButton, false);
-        SetButtonInteractable(blacklistButton, false);
-        SetButtonInteractable(rankingButton, false);
+        // Bank/Blacklist/Ranking are permanently unlocked once the FIRST Garage
+        // tutorial finishes (UI_Tutorial/Fifteen dismissed in NewGarage). Until
+        // then they are forced locked so the guided steps cannot be bypassed.
+        // Ranking has an additional gameplay gate owned by RankingService — even
+        // after the Garage tutorial it stays locked until the player is ranked.
+        bool garageDone = _saveData != null && _saveData.fifteenDismissed;
+        bool rankingSystemUnlocked = RankingService.Instance != null && RankingService.Instance.IsRankingUnlocked;
+
+        bool bankInteractable = garageDone;
+        bool blacklistInteractable = garageDone;
+        bool rankingInteractable = garageDone && rankingSystemUnlocked;
+
+        ApplyAndLogBottomBarButton(bankButton, bankInteractable, ref _bankBottomBarLastInteractable, "Bank");
+        ApplyAndLogBottomBarButton(blacklistButton, blacklistInteractable, ref _blacklistBottomBarLastInteractable, "Blacklist");
+        ApplyAndLogRankingButton(rankingButton, rankingInteractable, garageDone, rankingSystemUnlocked);
+    }
+
+    private static void ApplyAndLogBottomBarButton(Button button, bool interactable, ref bool? lastApplied, string label)
+    {
+        SetButtonInteractable(button, interactable);
+        if (!lastApplied.HasValue || lastApplied.Value != interactable)
+        {
+            Debug.Log($"[TutorialMgr][BottomBarUnlock] {label} {(interactable ? "unlocked" : "locked")}");
+            lastApplied = interactable;
+        }
+    }
+
+    private void ApplyAndLogRankingButton(Button button, bool interactable, bool garageDone, bool rankingSystemUnlocked)
+    {
+        SetButtonInteractable(button, interactable);
+        if (!_rankingBottomBarLastInteractable.HasValue || _rankingBottomBarLastInteractable.Value != interactable)
+        {
+            if (interactable)
+                Debug.Log($"[TutorialMgr][BottomBarUnlock] Ranking unlocked: garageDone=true rankingSystemUnlocked=true");
+            else
+                Debug.Log($"[TutorialMgr][BottomBarUnlock] Ranking waiting: garageDone={garageDone}, rankingSystemUnlocked={rankingSystemUnlocked}");
+            _rankingBottomBarLastInteractable = interactable;
+        }
     }
 
     private void ApplyCardsTabLockState()
@@ -1616,6 +2018,70 @@ public class TutorialManager : MonoBehaviour
             Debug.Log($"[TutorialMgr][CardsTut] No Cards-segment route. chestSlotTutorialShown={_saveData?.chestSlotTutorialShown} " +
                       $"freeOpenedCount={_saveData?.tutorialFreeChestOpenedCount} clickerPressed={_saveData?.cardsSegmentClickerPressed} " +
                       $"chestUnlocked={_saveData?.chestUnlocked} tutorialChestCollected={_saveData?.tutorialChestCollected}");
+        }
+
+        // Steps 14–19: Radar/Police tutorial segment routing on reload.
+        if (_saveData != null
+            && _saveData.radarTutorialQueued
+            && !_saveData.thirteenDismissed)
+        {
+            // First entry from ChestOpenScene return: radarTutorialQueued just
+            // got persisted by ChestInventoryManager.BumpTutorialFreeChestOpenedCount
+            // but radarUnlocked has not yet been set. Use the animated reveal path.
+            // Subsequent reloads (radarUnlocked already true) use the immediate
+            // path so PopularityBar pops in without re-animating.
+            if (!_saveData.radarUnlocked)
+            {
+                Debug.Log("[TutorialMgr][RadarTut] Routing → FIRST-ENTRY animated path (EnterRadarPoliceTutorial). radarTutorialQueued=TRUE, radarUnlocked=FALSE.");
+                EnterRadarPoliceTutorial();
+            }
+            else
+            {
+                Debug.Log("[TutorialMgr][RadarTut] Routing → RELOAD immediate path (ApplyRadarPoliceTutorialStateImmediate). radarTutorialQueued=TRUE, radarUnlocked=TRUE.");
+                ApplyRadarPoliceTutorialStateImmediate();
+            }
+        }
+        else if (_saveData != null && _saveData.thirteenDismissed)
+        {
+            // Permanent post-segment state: PopularityBar visible, police unlocked.
+            Debug.Log("[TutorialMgr][RadarTut] Routing → POST-SEGMENT (thirteenDismissed=TRUE) → ShowPopularityBarImmediate only.");
+            ShowPopularityBarImmediate();
+        }
+        else
+        {
+            Debug.Log($"[TutorialMgr][RadarTut] Routing → SKIPPED. radarTutorialQueued={_saveData?.radarTutorialQueued} thirteenDismissed={_saveData?.thirteenDismissed} freeOpenedCount={_saveData?.tutorialFreeChestOpenedCount}/{TutorialGate.TutorialFreeChestQuota}.");
+        }
+
+        // Steps 20–22: Garage tutorial segment routing on reload.
+        if (_saveData != null
+            && _saveData.garageTutorialQueued
+            && !_saveData.fifteenDismissed)
+        {
+            // Authoritative gate first — if chase is somehow still active or
+            // we're awaiting OnChaseEnded, force-hide before doing anything else.
+            ApplyBtnGarageGateVisibility("HandleGameLoaded.GarageRouting");
+
+            bool chaseActive = PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive;
+            if (chaseActive || _isAwaitingGarageTutorialAfterChase)
+            {
+                Debug.Log($"[TutorialMgr][GarageTut] Routing → garageTutorialQueued=TRUE but chaseActive={chaseActive} awaiting={_isAwaitingGarageTutorialAfterChase} → deferring ApplyGarageTutorialStateImmediate.");
+            }
+            else
+            {
+                Debug.Log($"[TutorialMgr][GarageTut] Routing → garageTutorialQueued=TRUE fifteenDismissed=FALSE garageButtonClicked={_saveData.garageButtonClicked} → ApplyGarageTutorialStateImmediate.");
+                ApplyGarageTutorialStateImmediate();
+            }
+        }
+        else if (_saveData != null && _saveData.fifteenDismissed)
+        {
+            // Segment complete — Btn_Garage permanently visible.
+            Debug.Log("[TutorialMgr][GarageTut] Routing → POST-SEGMENT (fifteenDismissed=TRUE) → ShowBtnGarageImmediate only.");
+            ShowBtnGarageImmediate();
+        }
+        else
+        {
+            // Not yet queued — force hidden.
+            ApplyBtnGarageGateVisibility("HandleGameLoaded.NotQueued");
         }
     }
 
@@ -2941,6 +3407,18 @@ public class TutorialManager : MonoBehaviour
         _saveData.tutorialFreeChestOpenedCount = next;
         _saveData.Save();
         TutorialGate.SetTutorialFreeChestOpenedCount(next);
+
+        // Step 14 entry: the third free Common Chest just opened.
+        if (next >= TutorialGate.TutorialFreeChestQuota
+            && !_saveData.radarTutorialQueued
+            && !_saveData.thirteenDismissed)
+        {
+            _saveData.radarTutorialQueued = true;
+            _saveData.currentStepIndex = Mathf.Max(_saveData.currentStepIndex, 14);
+            _saveData.Save();
+            Debug.Log("[TutorialMgr][RadarPolice] Quota reached — entering Step 14 (radar/police segment).");
+            EnterRadarPoliceTutorial();
+        }
     }
 
     /// <summary>
@@ -3269,6 +3747,24 @@ public class TutorialManager : MonoBehaviour
         _isStepTenCompletionInProgress = false;
         _isStepTenStartDelayQueued = false;
 
+        // Steps 14–19 runtime flags
+        _isAwaitingTutorialRadarSpawn = false;
+        _isStepSixteenActive = false;
+        _isStepSixteenCompletionInProgress = false;
+        _canDismissEleven = false;
+        _isAwaitingTutorialChase = false;
+        _isStepEighteenActive = false;
+        _isStepEighteenCompletionInProgress = false;
+        _canDismissThirteen = false;
+
+        // Steps 20–22 runtime flags
+        _isAwaitingGarageTutorialAfterChase = false;
+        if (_garageTutorialAfterChaseCoroutine != null)
+        {
+            StopCoroutine(_garageTutorialAfterChaseCoroutine);
+            _garageTutorialAfterChaseCoroutine = null;
+        }
+
         // Mirror cleared persistent flags into the gate and clear transient state.
         TutorialGate.SyncFromSave(_saveData);
         TutorialGate.SetGameplayFrozen(false);
@@ -3297,6 +3793,15 @@ public class TutorialManager : MonoBehaviour
         SetStepThreeNewVisibleImmediate(false);
         SetStepNineVisibleImmediate(false);
         SetStepTenVisibleImmediate(false);
+        SetStepElevenVisibleImmediate(false);
+        SetStepTwelveVisibleImmediate(false);
+        SetStepThirteenVisibleImmediate(false);
+        StopStepTwelveLoopAnimation(restoreTransform: true);
+        // Steps 20–22: Garage tutorial cleanup.
+        UnregisterBtnGarageListener();
+        StopStepFourteenLoopAnimation(restoreTransform: true);
+        SetStepFourteenVisibleImmediate(false);
+        if (fourteenInputBlocker != null) fourteenInputBlocker.SetActive(false);
         ApplyTutorialState();
     }
 
@@ -4358,5 +4863,1423 @@ public class TutorialManager : MonoBehaviour
     private void ContextResetTutorialProgress()
     {
         ResetTutorialProgress();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Steps 14–19 — Radar / Police Tutorial Segment
+    //  After the 3rd free Common Chest opens:
+    //   14. PopularityBar reveal (animated) + RadarUnlocked = true.
+    //   15. Force-spawn deterministic tutorial Radar; freeze on center.
+    //   16. Show Eleven (dialog) + Twelve (pointer) on tap.
+    //   17. Tap-anywhere dismiss → unfreeze → force tutorial police chase.
+    //   18. OnChaseStarted: freeze + show Thirteen.
+    //   19. Tap-anywhere dismiss → unfreeze → PoliceLocked = false (permanent).
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Step 14 first-entry hook (called from <see cref="HandleChestRemovedAfterOpen"/>
+    /// the moment the 3rd free chest opens).
+    /// </summary>
+    private void EnterRadarPoliceTutorial()
+    {
+        if (_saveData == null) { Debug.LogWarning("[TutorialMgr][RadarTut] EnterRadarPoliceTutorial: _saveData==null, abort."); return; }
+
+        Debug.Log($"[TutorialMgr][RadarTut] EnterRadarPoliceTutorial: ENTER. radarSpawnerAssigned={(radarSpawner != null)} popularityBarRootAssigned={(popularityBarRoot != null)}");
+        if (radarSpawner == null)
+            Debug.LogError("[TutorialMgr][RadarTut] radarSpawner is NULL on TutorialManager — assign Inspector field 'Radar Spawner' to the scene RadarSpawner. Tutorial radar will NOT spawn.");
+        if (popularityBarRoot == null)
+            Debug.LogError("[TutorialMgr][RadarTut] popularityBarRoot is NULL on TutorialManager — assign Inspector field 'Popularity Bar Root' to the TopBar/PopularityBar GameObject. PopularityBar will NOT animate in.");
+
+        _saveData.radarUnlocked = true;
+        _saveData.Save();
+        TutorialGate.SetRadarUnlocked(true);
+        Debug.Log("[TutorialMgr][RadarTut] EnterRadarPoliceTutorial: radarUnlocked=TRUE persisted+gated.");
+
+        ShowPopularityBarAnimated();
+
+        // Begin the wait for a deterministic tutorial radar spawn.
+        _isAwaitingTutorialRadarSpawn = true;
+        Debug.Log("[TutorialMgr][RadarTut] EnterRadarPoliceTutorial: _isAwaitingTutorialRadarSpawn=TRUE.");
+    }
+
+    /// <summary>
+    /// Re-applies the radar/police tutorial segment state on reload, branching
+    /// to the highest-priority unfinished sub-step.
+    /// </summary>
+    private void ApplyRadarPoliceTutorialStateImmediate()
+    {
+        if (_saveData == null) return;
+
+        TutorialGate.SyncFromSave(_saveData);
+        // Transient flags clear on every (re)apply.
+        TutorialGate.SetGameplayFrozen(false);
+        RestoreFrozenCarAnimatorIfAny();
+
+        // PopularityBar must be visible — immediate (no animation) on reload.
+        ShowPopularityBarImmediate();
+
+        // Defensive: ensure radar gate is open.
+        if (!TutorialGate.RadarUnlocked)
+        {
+            _saveData.radarUnlocked = true;
+            _saveData.Save();
+            TutorialGate.SetRadarUnlocked(true);
+        }
+
+        // Reset transient visuals.
+        SetStepElevenVisibleImmediate(false);
+        SetStepTwelveVisibleImmediate(false);
+        SetStepThirteenVisibleImmediate(false);
+        StopStepTwelveLoopAnimation(restoreTransform: true);
+
+        Debug.Log($"[TutorialMgr][RadarPolice] ApplyRadarPoliceTutorialStateImmediate: " +
+                  $"firstSpawned={_saveData.firstTutorialRadarSpawned} tapped={_saveData.radarTutorialTapped} " +
+                  $"elevenDismissed={_saveData.elevenTwelveDismissed} chaseStarted={_saveData.policeTutorialChaseStarted} " +
+                  $"thirteenDismissed={_saveData.thirteenDismissed}");
+        Debug.Log($"[TutorialMgr][RadarTut] ApplyRadarPoliceTutorialStateImmediate ENTER: radarSpawnerAssigned={(radarSpawner != null)} " +
+                  $"popularityBarRootAssigned={(popularityBarRoot != null)} radarUnlocked={_saveData.radarUnlocked} policeLocked={_saveData.policeLocked} " +
+                  $"queued={_saveData.radarTutorialQueued} firstSpawned={_saveData.firstTutorialRadarSpawned} tapped={_saveData.radarTutorialTapped} " +
+                  $"elevenDismissed={_saveData.elevenTwelveDismissed} chaseStarted={_saveData.policeTutorialChaseStarted} thirteenDismissed={_saveData.thirteenDismissed}");
+        if (radarSpawner == null)
+            Debug.LogError("[TutorialMgr][RadarTut] radarSpawner NULL — assign Inspector field 'Radar Spawner'.");
+        if (popularityBarRoot == null)
+            Debug.LogError("[TutorialMgr][RadarTut] popularityBarRoot NULL — assign Inspector field 'Popularity Bar Root'.");
+
+        // Step 19 — segment complete (defensive; outer caller already filtered this).
+        if (_saveData.thirteenDismissed)
+        {
+            Debug.Log("[TutorialMgr][RadarTut] Branch=Step19 (segment complete).");
+            return;
+        }
+
+        // Step 18 — chase was triggered last session but Thirteen never dismissed.
+        // Per design: re-trigger the chase fresh and re-show Thirteen on OnChaseStarted.
+        if (_saveData.policeTutorialChaseStarted && !_saveData.thirteenDismissed)
+        {
+            Debug.Log("[TutorialMgr][RadarTut] Branch=Step18 (chase started, Thirteen not dismissed) → re-trigger chase.");
+            // Reset so a fresh chase fires.
+            _saveData.policeTutorialChaseStarted = false;
+            _saveData.Save();
+            _isAwaitingTutorialChase = true;
+            return;
+        }
+
+        // Step 17 — Eleven/Twelve already dismissed; need to start chase.
+        if (_saveData.elevenTwelveDismissed && !_saveData.policeTutorialChaseStarted)
+        {
+            Debug.Log("[TutorialMgr][RadarTut] Branch=Step17 (await chase trigger).");
+            _isAwaitingTutorialChase = true;
+            return;
+        }
+
+        // Step 16 — player tapped tutorial radar; need to (re-)show Eleven/Twelve.
+        if (_saveData.radarTutorialTapped && !_saveData.elevenTwelveDismissed)
+        {
+            Debug.Log("[TutorialMgr][RadarTut] Branch=Step16 (re-show Eleven/Twelve).");
+            TutorialGate.SetGameplayFrozen(true);
+            DOVirtual.DelayedCall(elevenTwelveOpenDelay, StartStepSixteen, true).SetUpdate(true);
+            return;
+        }
+
+        // Step 15 / 14 — need a tutorial radar in the world.
+        Debug.Log("[TutorialMgr][RadarTut] Branch=Step14/15 (await tutorial radar spawn). _isAwaitingTutorialRadarSpawn=TRUE.");
+        _isAwaitingTutorialRadarSpawn = true;
+    }
+
+    // ── Step 14 — PopularityBar reveal ──
+
+    private void CachePopularityBarOriginalTransform()
+    {
+        if (_popularityBarRectTransform == null) return;
+        if (_popularityBarOriginalTransformCached) return;
+        _popularityBarOriginalScale = _popularityBarRectTransform.localScale;
+        _popularityBarOriginalTransformCached = true;
+    }
+
+    private void ShowPopularityBarImmediate()
+    {
+        if (popularityBarRoot == null)
+        {
+            Debug.LogError("[PopularityBar][RadarTut] ShowPopularityBarImmediate: popularityBarRoot NULL — assign Inspector field on TutorialManager. Aborting.");
+            return;
+        }
+        CachePopularityBarOriginalTransform();
+
+        bool wasActive = popularityBarRoot.activeSelf;
+        Vector3 priorScale = _popularityBarRectTransform != null ? _popularityBarRectTransform.localScale : Vector3.one;
+        float priorAlpha = _popularityBarCanvasGroup != null ? _popularityBarCanvasGroup.alpha : -1f;
+
+        popularityBarRoot.SetActive(true);
+        if (_popularityBarRectTransform != null)
+            _popularityBarRectTransform.localScale = _popularityBarOriginalScale;
+        if (_popularityBarCanvasGroup != null)
+        {
+            _popularityBarCanvasGroup.alpha = 1f;
+            _popularityBarCanvasGroup.interactable = true;
+            _popularityBarCanvasGroup.blocksRaycasts = true;
+        }
+        Debug.Log($"[PopularityBar][RadarTut] ShowPopularityBarImmediate: activeSelf {wasActive}→{popularityBarRoot.activeSelf} activeInHierarchy={popularityBarRoot.activeInHierarchy} alpha {priorAlpha}→{(_popularityBarCanvasGroup != null ? _popularityBarCanvasGroup.alpha : -1f)} scale {priorScale}→{(_popularityBarRectTransform != null ? _popularityBarRectTransform.localScale : Vector3.one)}");
+    }
+
+    private void ShowPopularityBarAnimated()
+    {
+        if (popularityBarRoot == null)
+        {
+            Debug.LogError("[PopularityBar][RadarTut] ShowPopularityBarAnimated: popularityBarRoot NULL — assign Inspector field 'Popularity Bar Root' on TutorialManager. Aborting.");
+            return;
+        }
+        CachePopularityBarOriginalTransform();
+
+        bool wasActive = popularityBarRoot.activeSelf;
+        Vector3 priorScale = _popularityBarRectTransform != null ? _popularityBarRectTransform.localScale : Vector3.one;
+        float priorAlpha = _popularityBarCanvasGroup != null ? _popularityBarCanvasGroup.alpha : -1f;
+        Debug.Log($"[PopularityBar][RadarTut] ShowPopularityBarAnimated ENTER: activeSelf={wasActive} activeInHierarchy={popularityBarRoot.activeInHierarchy} alpha={priorAlpha} scale={priorScale} originalScale={_popularityBarOriginalScale} startScale={premiumStartScale} duration={premiumIntroDuration}");
+
+        popularityBarRoot.SetActive(true);
+
+        if (_popularityBarCanvasGroup != null)
+        {
+            _popularityBarCanvasGroup.alpha = 0f;
+            _popularityBarCanvasGroup.interactable = false;
+            _popularityBarCanvasGroup.blocksRaycasts = false;
+        }
+
+        if (_popularityBarRectTransform != null)
+            _popularityBarRectTransform.localScale = _popularityBarOriginalScale * premiumStartScale;
+
+        Sequence intro = DOTween.Sequence();
+        intro.SetUpdate(true);
+
+        if (_popularityBarRectTransform != null)
+            intro.Join(_popularityBarRectTransform.DOScale(_popularityBarOriginalScale, premiumIntroDuration).SetEase(premiumIntroEase));
+        if (_popularityBarCanvasGroup != null)
+            intro.Join(_popularityBarCanvasGroup.DOFade(1f, premiumIntroDuration));
+
+        intro.OnComplete(() =>
+        {
+            if (_popularityBarCanvasGroup != null)
+            {
+                _popularityBarCanvasGroup.interactable = true;
+                _popularityBarCanvasGroup.blocksRaycasts = true;
+            }
+            Debug.Log($"[PopularityBar][RadarTut] ShowPopularityBarAnimated COMPLETE: alpha={(_popularityBarCanvasGroup != null ? _popularityBarCanvasGroup.alpha : -1f)} scale={(_popularityBarRectTransform != null ? _popularityBarRectTransform.localScale : Vector3.one)} activeInHierarchy={popularityBarRoot.activeInHierarchy}");
+        });
+    }
+
+    // ── Step 15 — Force-spawn tutorial radar ──
+
+    private bool _radarTutSpawnLoggedNullSpawner;
+    private bool _radarTutSpawnLoggedFrozen;
+    private void TryForceSpawnTutorialRadar()
+    {
+        if (_saveData == null) { _isAwaitingTutorialRadarSpawn = false; return; }
+        if (_saveData.radarTutorialTapped) { _isAwaitingTutorialRadarSpawn = false; return; }
+
+        // Idempotency: if a tutorial radar is already alive in the scene, do NOT
+        // spawn another. Clear the awaiting flag so polling stops.
+        Radar[] existing = FindObjectsByType<Radar>(FindObjectsSortMode.None);
+        for (int i = 0; i < existing.Length; i++)
+        {
+            if (existing[i] != null && existing[i].IsTutorialRadar)
+            {
+                _isAwaitingTutorialRadarSpawn = false;
+                if (!_saveData.firstTutorialRadarSpawned)
+                {
+                    _saveData.firstTutorialRadarSpawned = true;
+                    _saveData.currentStepIndex = Mathf.Max(_saveData.currentStepIndex, 15);
+                    _saveData.Save();
+                }
+                Debug.Log($"[TutorialMgr][RadarTut] TryForceSpawnTutorialRadar: tutorial radar already alive ('{existing[i].name}'). Skipping spawn, clearing await.");
+                return;
+            }
+        }
+
+        if (radarSpawner == null)
+        {
+            if (!_radarTutSpawnLoggedNullSpawner)
+            {
+                Debug.LogError("[TutorialMgr][RadarTut] TryForceSpawnTutorialRadar: radarSpawner NULL — assign Inspector field 'Radar Spawner' on TutorialManager. Cannot force-spawn tutorial radar.");
+                _radarTutSpawnLoggedNullSpawner = true;
+            }
+            return;
+        }
+        if (TutorialGate.GameplayFrozen)
+        {
+            if (!_radarTutSpawnLoggedFrozen)
+            {
+                Debug.Log("[TutorialMgr][RadarTut] TryForceSpawnTutorialRadar: gameplay frozen, deferring spawn.");
+                _radarTutSpawnLoggedFrozen = true;
+            }
+            return;
+        }
+        _radarTutSpawnLoggedFrozen = false;
+
+        // Clear the awaiting flag and persist firstTutorialRadarSpawned BEFORE
+        // calling Instantiate, so any re-entrant Update poll within the same
+        // frame cannot trigger a second spawn.
+        _isAwaitingTutorialRadarSpawn = false;
+        bool wasFirst = _saveData.firstTutorialRadarSpawned;
+        if (!_saveData.firstTutorialRadarSpawned)
+        {
+            _saveData.firstTutorialRadarSpawned = true;
+            _saveData.currentStepIndex = Mathf.Max(_saveData.currentStepIndex, 15);
+            _saveData.Save();
+        }
+
+        Debug.Log($"[TutorialMgr][RadarTut] TryForceSpawnTutorialRadar: invoking radarSpawner.ForceSpawnTutorialRadar(). RadarUnlocked={TutorialGate.RadarUnlocked} firstSpawnedBefore={wasFirst}");
+        Radar spawned = radarSpawner.ForceSpawnTutorialRadar();
+        if (spawned != null)
+        {
+            Debug.Log($"[TutorialMgr][RadarTut] TryForceSpawnTutorialRadar: SPAWNED '{spawned.name}' at {spawned.transform.position}. firstSpawned {wasFirst}→{_saveData.firstTutorialRadarSpawned}.");
+        }
+        else
+        {
+            // Spawn failed (prefab/spawnpoints missing). Roll back so we can retry.
+            _isAwaitingTutorialRadarSpawn = true;
+            if (!wasFirst)
+            {
+                _saveData.firstTutorialRadarSpawned = false;
+                _saveData.Save();
+            }
+            Debug.LogWarning("[TutorialMgr][RadarTut] TryForceSpawnTutorialRadar: ForceSpawnTutorialRadar() returned NULL. Rolled back firstTutorialRadarSpawned and re-queued spawn.");
+        }
+    }
+
+    private void HandleTutorialRadarReachedCenter(Radar radar)
+    {
+        if (radar == null || !radar.IsTutorialRadar) return;
+
+        Debug.Log($"[TutorialMgr][RadarTut] HandleTutorialRadarReachedCenter: radar='{radar.name}' pos={radar.transform.position}. Freezing gameplay.");
+        // Freeze gameplay so the radar holds at the center until tapped.
+        TutorialGate.SetGameplayFrozen(true);
+    }
+
+    private void HandleTutorialRadarTapped(Radar radar)
+    {
+        if (radar == null || !radar.IsTutorialRadar) return;
+        if (_saveData == null) return;
+        if (_saveData.radarTutorialTapped) return;
+
+        _saveData.radarTutorialTapped = true;
+        _saveData.currentStepIndex = Mathf.Max(_saveData.currentStepIndex, 16);
+        _saveData.Save();
+        Debug.Log($"[TutorialMgr][RadarTut] HandleTutorialRadarTapped: radar='{radar.name}'. radarTutorialTapped=TRUE persisted. Scheduling Eleven/Twelve in {elevenTwelveOpenDelay}s.");
+
+        // Keep gameplay frozen across the tap-vanish animation; Eleven/Twelve are about to open.
+        DOVirtual.DelayedCall(elevenTwelveOpenDelay, StartStepSixteen, true).SetUpdate(true);
+    }
+
+    // ── Step 16 — Eleven (dialog) + Twelve (pointer) ──
+
+    private void StartStepSixteen()
+    {
+        if (_saveData == null) return;
+        if (_saveData.elevenTwelveDismissed) return;
+        if (_isStepSixteenActive || _isStepSixteenCompletionInProgress) return;
+
+        // Make sure gameplay stays frozen during the popup.
+        if (!TutorialGate.GameplayFrozen)
+            TutorialGate.SetGameplayFrozen(true);
+
+        _isStepSixteenActive = true;
+        _canDismissEleven = false;
+
+        if (tutorialRoot != null)
+            tutorialRoot.SetActive(true);
+
+        _isTransitionInProgress = true;
+        Sequence sequence = DOTween.Sequence();
+        sequence.SetUpdate(true);
+        sequence.Join(ShowDim(blockInput: true));
+        sequence.Join(ShowStepElevenVisual());
+        sequence.Join(ShowStepTwelveVisual());
+        sequence.OnComplete(() =>
+        {
+            _isTransitionInProgress = false;
+            _activeTransition = null;
+            StartStepTwelveLoopAnimation();
+            StartCoroutine(ArmStepSixteenDismissOnNextFrame());
+        });
+        sequence.OnKill(() =>
+        {
+            if (_activeTransition == sequence)
+                _activeTransition = null;
+        });
+        _activeTransition = sequence;
+    }
+
+    private IEnumerator ArmStepSixteenDismissOnNextFrame()
+    {
+        yield return null;
+        _canDismissEleven = true;
+    }
+
+    private void CompleteStepSixteen()
+    {
+        if (_isStepSixteenCompletionInProgress) return;
+
+        _isStepSixteenCompletionInProgress = true;
+        _isStepSixteenActive = false;
+        _canDismissEleven = false;
+
+        StopStepTwelveLoopAnimation(restoreTransform: true);
+        KillActiveTransition();
+
+        Sequence sequence = DOTween.Sequence();
+        sequence.SetUpdate(true);
+        sequence.Join(HideStepElevenVisual());
+        sequence.Join(HideStepTwelveVisual());
+        sequence.Join(HideDim());
+        sequence.OnComplete(() =>
+        {
+            SetStepElevenVisibleImmediate(false);
+            SetStepTwelveVisibleImmediate(false);
+
+            _saveData.elevenTwelveDismissed = true;
+            _saveData.currentStepIndex = Mathf.Max(_saveData.currentStepIndex, 17);
+            _saveData.Save();
+
+            TutorialGate.SetGameplayFrozen(false);
+
+            _isStepSixteenCompletionInProgress = false;
+
+            // Schedule the deterministic tutorial police chase.
+            DOVirtual.DelayedCall(policeTutorialStartDelay, () =>
+            {
+                if (!isActiveAndEnabled) return;
+                _isAwaitingTutorialChase = true;
+            }, true).SetUpdate(true);
+        });
+    }
+
+    // ── Step 17 — Force tutorial police chase ──
+
+    private void TryForceTutorialChase()
+    {
+        if (_saveData == null) { _isAwaitingTutorialChase = false; return; }
+        if (_saveData.policeTutorialChaseStarted) { _isAwaitingTutorialChase = false; return; }
+
+        PoliceCatchTrigger trigger = policeCatchTrigger != null
+            ? policeCatchTrigger
+            : PoliceCatchTrigger.Instance;
+
+        if (trigger == null) return;
+        if (PoliceCatchController.Instance == null) return;
+        if (PoliceCatchController.Instance.IsChaseActive) return;
+
+        _saveData.policeTutorialChaseStarted = true;
+        _saveData.currentStepIndex = Mathf.Max(_saveData.currentStepIndex, 18);
+        _saveData.Save();
+        _isAwaitingTutorialChase = false;
+
+        trigger.ForceTutorialChase();
+    }
+
+    private void HandleChaseStartedForTutorial()
+    {
+        if (_saveData == null) return;
+        if (_saveData.thirteenDismissed) return;
+        if (!_saveData.policeTutorialChaseStarted) return;
+
+        Debug.Log("[TutorialMgr][GarageTut] police chase started");
+
+        // Defensive: chase started — ensure Btn_Garage is forced hidden until completion.
+        ApplyBtnGarageGateVisibility("HandleChaseStartedForTutorial");
+
+        // Freeze chase progression and show Thirteen.
+        TutorialGate.SetGameplayFrozen(true);
+        StartStepEighteen();
+    }
+
+    /// <summary>
+    /// Fired by PoliceCatchController.OnChaseEnded. If the Garage tutorial is
+    /// pending (Thirteen dismissed but Fourteen not yet shown), wait until the
+    /// TopBar finishes restoring then enter the Garage tutorial. Otherwise no-op.
+    /// </summary>
+    private void HandleChaseEndedForGarageTutorial()
+    {
+        if (!_isAwaitingGarageTutorialAfterChase) return;
+        if (_saveData == null) return;
+        if (_saveData.fifteenDismissed) { _isAwaitingGarageTutorialAfterChase = false; return; }
+        if (!_saveData.garageTutorialQueued) return;
+        if (_saveData.garageButtonClicked) { _isAwaitingGarageTutorialAfterChase = false; return; }
+
+        Debug.Log("[TutorialMgr][GarageTut] waiting for police chase end/topbar restore");
+
+        if (_garageTutorialAfterChaseCoroutine != null)
+            StopCoroutine(_garageTutorialAfterChaseCoroutine);
+        _garageTutorialAfterChaseCoroutine = StartCoroutine(WaitForTopBarRestoredThenEnterGarageTutorial());
+    }
+
+    private IEnumerator WaitForTopBarRestoredThenEnterGarageTutorial()
+    {
+        // Poll until the TopBar reports restored (not compact). PoliceCatchController
+        // calls TopBarAnimator.ShowAnimated() on chase end; the animation typically
+        // toggles isCompact synchronously, but we still safety-poll a few frames.
+        const float maxWaitSeconds = 3f;
+        float elapsed = 0f;
+        while (elapsed < maxWaitSeconds)
+        {
+            bool topBarRestored = TopBarAnimator.Instance == null || !TopBarAnimator.Instance.IsCompact;
+            bool chaseClear = PoliceCatchController.Instance == null || !PoliceCatchController.Instance.IsChaseActive;
+            if (topBarRestored && chaseClear) break;
+            elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
+
+        // Re-validate guards (state may have changed during the wait).
+        if (_saveData == null) yield break;
+        if (_saveData.fifteenDismissed) { _isAwaitingGarageTutorialAfterChase = false; yield break; }
+        if (!_saveData.garageTutorialQueued) yield break;
+        if (_saveData.garageButtonClicked) { _isAwaitingGarageTutorialAfterChase = false; yield break; }
+
+        Debug.Log("[TutorialMgr][GarageTut] police chase ended/topbar restored → starting Fourteen");
+        _isAwaitingGarageTutorialAfterChase = false;
+        _garageTutorialAfterChaseCoroutine = null;
+        EnterGarageTutorial();
+    }
+
+    // ── Step 18 — Thirteen (dialog over the active chase) ──
+
+    private void StartStepEighteen()
+    {
+        if (_saveData == null) return;
+        if (_saveData.thirteenDismissed) return;
+        if (_isStepEighteenActive || _isStepEighteenCompletionInProgress) return;
+
+        if (!TutorialGate.GameplayFrozen)
+            TutorialGate.SetGameplayFrozen(true);
+
+        _isStepEighteenActive = true;
+        _canDismissThirteen = false;
+
+        if (tutorialRoot != null)
+            tutorialRoot.SetActive(true);
+
+        _isTransitionInProgress = true;
+        Sequence sequence = DOTween.Sequence();
+        sequence.SetUpdate(true);
+        sequence.Join(ShowDim(blockInput: true));
+        sequence.Join(ShowStepThirteenVisual());
+        sequence.OnComplete(() =>
+        {
+            _isTransitionInProgress = false;
+            _activeTransition = null;
+            StartCoroutine(ArmStepEighteenDismissOnNextFrame());
+        });
+        sequence.OnKill(() =>
+        {
+            if (_activeTransition == sequence)
+                _activeTransition = null;
+        });
+        _activeTransition = sequence;
+    }
+
+    private IEnumerator ArmStepEighteenDismissOnNextFrame()
+    {
+        yield return null;
+        _canDismissThirteen = true;
+    }
+
+    private void CompleteStepEighteen()
+    {
+        if (_isStepEighteenCompletionInProgress) return;
+
+        _isStepEighteenCompletionInProgress = true;
+        _isStepEighteenActive = false;
+        _canDismissThirteen = false;
+
+        KillActiveTransition();
+
+        Sequence sequence = DOTween.Sequence();
+        sequence.SetUpdate(true);
+        sequence.Join(HideStepThirteenVisual());
+        sequence.Join(HideDim());
+        sequence.OnComplete(() =>
+        {
+            SetStepThirteenVisibleImmediate(false);
+
+            _saveData.thirteenDismissed = true;
+            _saveData.policeLocked = false;
+            _saveData.currentStepIndex = Mathf.Max(_saveData.currentStepIndex, 19);
+            // Step 20: queue the Garage tutorial. Btn_Garage stays permanently visible
+            // from now on (topBarInitiallyHidden exception keyed on garageTutorialQueued).
+            _saveData.garageTutorialQueued = true;
+            _saveData.Save();
+
+            TutorialGate.SetPoliceLocked(false);
+            TutorialGate.SetGarageUnlocked(true);
+            TutorialGate.SetGameplayFrozen(false);
+
+            _isStepEighteenCompletionInProgress = false;
+            Debug.Log("[TutorialMgr][RadarPolice] Step 19 complete — police permanently unlocked. Garage tutorial queued.");
+
+            // Step 20 deferred: do NOT show Fourteen now — the police chase is
+            // still running and the TopBar is in compact mode. Mark pending and
+            // wait for OnChaseEnded + TopBar restored (handled in
+            // HandleChaseEndedForGarageTutorial). On a cold reload while pending,
+            // ApplyGarageTutorialStateImmediate covers the case (chase isn't
+            // active on reload).
+            _isAwaitingGarageTutorialAfterChase = true;
+            Debug.Log("[TutorialMgr][GarageTut] thirteen dismissed — waiting for police chase end/topbar restore before showing Fourteen.");
+            // Defensive: even though garageTutorialQueued is now TRUE, the chase
+            // is still active. Keep Btn_Garage hidden until OnChaseEnded reveals it.
+            ApplyBtnGarageGateVisibility("CompleteStepEighteen.OnComplete");
+        });
+    }
+
+    // ── Step 16/18 visual pipeline (Eleven, Twelve, Thirteen) ──
+
+    private void CacheStepElevenOriginalTransform()
+    {
+        if (_elevenRectTransform == null)
+            _elevenRectTransform = eleven != null ? eleven.GetComponent<RectTransform>() : null;
+        if (_elevenRectTransform == null) return;
+        if (_elevenOriginalTransformCached) return;
+        _elevenOriginalScale = _elevenRectTransform.localScale;
+        _elevenOriginalAnchoredPosition = _elevenRectTransform.anchoredPosition;
+        _elevenOriginalTransformCached = true;
+    }
+
+    private void RestoreStepElevenOriginalTransform()
+    {
+        if (_elevenRectTransform == null) return;
+        if (!_elevenOriginalTransformCached) CacheStepElevenOriginalTransform();
+        _elevenRectTransform.localScale = _elevenOriginalScale;
+        _elevenRectTransform.anchoredPosition = _elevenOriginalAnchoredPosition;
+    }
+
+    private void SetStepElevenVisibleImmediate(bool visible)
+    {
+        if (eleven == null) return;
+        if (_elevenCanvasGroup == null) _elevenCanvasGroup = GetOrAddCanvasGroup(eleven);
+        CacheStepElevenOriginalTransform();
+
+        if (visible)
+        {
+            eleven.SetActive(true);
+            RestoreStepElevenOriginalTransform();
+            if (_elevenCanvasGroup != null)
+            {
+                _elevenCanvasGroup.alpha = 1f;
+                _elevenCanvasGroup.interactable = true;
+                _elevenCanvasGroup.blocksRaycasts = true;
+            }
+        }
+        else
+        {
+            if (_elevenCanvasGroup != null)
+            {
+                _elevenCanvasGroup.alpha = 0f;
+                _elevenCanvasGroup.interactable = false;
+                _elevenCanvasGroup.blocksRaycasts = false;
+            }
+            eleven.SetActive(false);
+        }
+    }
+
+    private Tween ShowStepElevenVisual()
+    {
+        if (eleven == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_elevenCanvasGroup == null) _elevenCanvasGroup = GetOrAddCanvasGroup(eleven);
+        CacheStepElevenOriginalTransform();
+
+        eleven.SetActive(true);
+        if (_elevenCanvasGroup != null)
+        {
+            _elevenCanvasGroup.alpha = 0f;
+            _elevenCanvasGroup.interactable = true;
+            _elevenCanvasGroup.blocksRaycasts = true;
+        }
+        if (_elevenRectTransform != null)
+            _elevenRectTransform.localScale = _elevenOriginalScale * panelStartScale;
+
+        Sequence show = DOTween.Sequence();
+        show.SetUpdate(true);
+        if (_elevenRectTransform != null)
+            show.Join(_elevenRectTransform.DOScale(_elevenOriginalScale, panelInDuration).SetEase(easeIn));
+        if (_elevenCanvasGroup != null)
+            show.Join(_elevenCanvasGroup.DOFade(1f, panelInDuration));
+        return show;
+    }
+
+    private Tween HideStepElevenVisual()
+    {
+        if (eleven == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_elevenCanvasGroup == null) _elevenCanvasGroup = GetOrAddCanvasGroup(eleven);
+        if (_elevenRectTransform == null) _elevenRectTransform = eleven.GetComponent<RectTransform>();
+        CacheStepElevenOriginalTransform();
+
+        Sequence hide = DOTween.Sequence();
+        hide.SetUpdate(true);
+        if (_elevenRectTransform != null)
+            hide.Join(_elevenRectTransform.DOScale(_elevenOriginalScale * panelStartScale, panelOutDuration).SetEase(easeOut));
+        if (_elevenCanvasGroup != null)
+            hide.Join(_elevenCanvasGroup.DOFade(0f, panelOutDuration));
+        hide.OnComplete(() =>
+        {
+            RestoreStepElevenOriginalTransform();
+            eleven.SetActive(false);
+        });
+        return hide;
+    }
+
+    private void CacheStepTwelveOriginalTransform()
+    {
+        if (_twelveRectTransform == null)
+            _twelveRectTransform = twelve != null ? twelve.GetComponent<RectTransform>() : null;
+        if (_twelveRectTransform == null) return;
+        if (_twelveOriginalTransformCached) return;
+        _twelveOriginalScale = _twelveRectTransform.localScale;
+        _twelveOriginalAnchoredPosition = _twelveRectTransform.anchoredPosition;
+        _twelveOriginalTransformCached = true;
+    }
+
+    private void RestoreStepTwelveOriginalTransform()
+    {
+        if (_twelveRectTransform == null) return;
+        if (!_twelveOriginalTransformCached) CacheStepTwelveOriginalTransform();
+        _twelveRectTransform.localScale = _twelveOriginalScale;
+        _twelveRectTransform.anchoredPosition = _twelveOriginalAnchoredPosition;
+    }
+
+    private void SetStepTwelveVisibleImmediate(bool visible)
+    {
+        if (twelve == null) return;
+        if (_twelveCanvasGroup == null) _twelveCanvasGroup = GetOrAddCanvasGroup(twelve);
+        CacheStepTwelveOriginalTransform();
+
+        if (visible)
+        {
+            twelve.SetActive(true);
+            RestoreStepTwelveOriginalTransform();
+            if (_twelveCanvasGroup != null)
+            {
+                _twelveCanvasGroup.alpha = 1f;
+                _twelveCanvasGroup.interactable = false;
+                _twelveCanvasGroup.blocksRaycasts = false;
+            }
+        }
+        else
+        {
+            if (_twelveCanvasGroup != null)
+            {
+                _twelveCanvasGroup.alpha = 0f;
+                _twelveCanvasGroup.interactable = false;
+                _twelveCanvasGroup.blocksRaycasts = false;
+            }
+            twelve.SetActive(false);
+        }
+    }
+
+    private Tween ShowStepTwelveVisual()
+    {
+        if (twelve == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_twelveCanvasGroup == null) _twelveCanvasGroup = GetOrAddCanvasGroup(twelve);
+        CacheStepTwelveOriginalTransform();
+
+        twelve.SetActive(true);
+        if (_twelveCanvasGroup != null)
+        {
+            _twelveCanvasGroup.alpha = 0f;
+            _twelveCanvasGroup.interactable = false;
+            _twelveCanvasGroup.blocksRaycasts = false;
+        }
+        Image twelveImage = twelve.GetComponent<Image>();
+        if (twelveImage != null) twelveImage.raycastTarget = false;
+
+        if (_twelveRectTransform != null)
+            _twelveRectTransform.localScale = _twelveOriginalScale * panelStartScale;
+
+        Sequence show = DOTween.Sequence();
+        show.SetUpdate(true);
+        if (_twelveRectTransform != null)
+            show.Join(_twelveRectTransform.DOScale(_twelveOriginalScale, panelInDuration).SetEase(easeIn));
+        if (_twelveCanvasGroup != null)
+            show.Join(_twelveCanvasGroup.DOFade(1f, panelInDuration));
+        return show;
+    }
+
+    private Tween HideStepTwelveVisual()
+    {
+        if (twelve == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_twelveCanvasGroup == null) _twelveCanvasGroup = GetOrAddCanvasGroup(twelve);
+        if (_twelveRectTransform == null) _twelveRectTransform = twelve.GetComponent<RectTransform>();
+        CacheStepTwelveOriginalTransform();
+
+        Sequence hide = DOTween.Sequence();
+        hide.SetUpdate(true);
+        if (_twelveRectTransform != null)
+            hide.Join(_twelveRectTransform.DOScale(_twelveOriginalScale * panelStartScale, panelOutDuration).SetEase(easeOut));
+        if (_twelveCanvasGroup != null)
+            hide.Join(_twelveCanvasGroup.DOFade(0f, panelOutDuration));
+        hide.OnComplete(() =>
+        {
+            RestoreStepTwelveOriginalTransform();
+            twelve.SetActive(false);
+        });
+        return hide;
+    }
+
+    private void StartStepTwelveLoopAnimation()
+    {
+        StopStepTwelveLoopAnimation(restoreTransform: true);
+        if (twelve == null || !twelve.activeInHierarchy) return;
+        if (_twelveRectTransform == null) _twelveRectTransform = twelve.GetComponent<RectTransform>();
+        if (_twelveRectTransform == null) return;
+
+        CacheStepTwelveOriginalTransform();
+        RestoreStepTwelveOriginalTransform();
+
+        Vector3 pulseScale = _twelveOriginalScale * (1f + stepTwoPulseScalePercent);
+        Vector2 bouncePos = _twelveOriginalAnchoredPosition + Vector2.up * stepTwoBounceDistance;
+
+        _stepTwelveLoopSequence = DOTween.Sequence();
+        _stepTwelveLoopSequence.SetUpdate(true);
+        _stepTwelveLoopSequence.Join(_twelveRectTransform.DOScale(pulseScale, stepTwoLoopDuration).SetEase(Ease.InOutSine));
+        _stepTwelveLoopSequence.Join(_twelveRectTransform.DOAnchorPos(bouncePos, stepTwoLoopDuration).SetEase(Ease.InOutSine));
+        _stepTwelveLoopSequence.SetLoops(-1, LoopType.Yoyo);
+    }
+
+    private void StopStepTwelveLoopAnimation(bool restoreTransform)
+    {
+        if (_stepTwelveLoopSequence != null)
+        {
+            _stepTwelveLoopSequence.Kill();
+            _stepTwelveLoopSequence = null;
+        }
+        if (restoreTransform)
+            RestoreStepTwelveOriginalTransform();
+    }
+
+    private void CacheStepThirteenOriginalTransform()
+    {
+        if (_thirteenRectTransform == null)
+            _thirteenRectTransform = thirteen != null ? thirteen.GetComponent<RectTransform>() : null;
+        if (_thirteenRectTransform == null) return;
+        if (_thirteenOriginalTransformCached) return;
+        _thirteenOriginalScale = _thirteenRectTransform.localScale;
+        _thirteenOriginalAnchoredPosition = _thirteenRectTransform.anchoredPosition;
+        _thirteenOriginalTransformCached = true;
+    }
+
+    private void RestoreStepThirteenOriginalTransform()
+    {
+        if (_thirteenRectTransform == null) return;
+        if (!_thirteenOriginalTransformCached) CacheStepThirteenOriginalTransform();
+        _thirteenRectTransform.localScale = _thirteenOriginalScale;
+        _thirteenRectTransform.anchoredPosition = _thirteenOriginalAnchoredPosition;
+    }
+
+    private void SetStepThirteenVisibleImmediate(bool visible)
+    {
+        if (thirteen == null) return;
+        if (_thirteenCanvasGroup == null) _thirteenCanvasGroup = GetOrAddCanvasGroup(thirteen);
+        CacheStepThirteenOriginalTransform();
+
+        if (visible)
+        {
+            thirteen.SetActive(true);
+            RestoreStepThirteenOriginalTransform();
+            if (_thirteenCanvasGroup != null)
+            {
+                _thirteenCanvasGroup.alpha = 1f;
+                _thirteenCanvasGroup.interactable = true;
+                _thirteenCanvasGroup.blocksRaycasts = true;
+            }
+        }
+        else
+        {
+            if (_thirteenCanvasGroup != null)
+            {
+                _thirteenCanvasGroup.alpha = 0f;
+                _thirteenCanvasGroup.interactable = false;
+                _thirteenCanvasGroup.blocksRaycasts = false;
+            }
+            thirteen.SetActive(false);
+        }
+    }
+
+    private Tween ShowStepThirteenVisual()
+    {
+        if (thirteen == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_thirteenCanvasGroup == null) _thirteenCanvasGroup = GetOrAddCanvasGroup(thirteen);
+        CacheStepThirteenOriginalTransform();
+
+        thirteen.SetActive(true);
+        if (_thirteenCanvasGroup != null)
+        {
+            _thirteenCanvasGroup.alpha = 0f;
+            _thirteenCanvasGroup.interactable = true;
+            _thirteenCanvasGroup.blocksRaycasts = true;
+        }
+        if (_thirteenRectTransform != null)
+            _thirteenRectTransform.localScale = _thirteenOriginalScale * panelStartScale;
+
+        Sequence show = DOTween.Sequence();
+        show.SetUpdate(true);
+        if (_thirteenRectTransform != null)
+            show.Join(_thirteenRectTransform.DOScale(_thirteenOriginalScale, panelInDuration).SetEase(easeIn));
+        if (_thirteenCanvasGroup != null)
+            show.Join(_thirteenCanvasGroup.DOFade(1f, panelInDuration));
+        return show;
+    }
+
+    private Tween HideStepThirteenVisual()
+    {
+        if (thirteen == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_thirteenCanvasGroup == null) _thirteenCanvasGroup = GetOrAddCanvasGroup(thirteen);
+        if (_thirteenRectTransform == null) _thirteenRectTransform = thirteen.GetComponent<RectTransform>();
+        CacheStepThirteenOriginalTransform();
+
+        Sequence hide = DOTween.Sequence();
+        hide.SetUpdate(true);
+        if (_thirteenRectTransform != null)
+            hide.Join(_thirteenRectTransform.DOScale(_thirteenOriginalScale * panelStartScale, panelOutDuration).SetEase(easeOut));
+        if (_thirteenCanvasGroup != null)
+            hide.Join(_thirteenCanvasGroup.DOFade(0f, panelOutDuration));
+        hide.OnComplete(() =>
+        {
+            RestoreStepThirteenOriginalTransform();
+            thirteen.SetActive(false);
+        });
+        return hide;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Step Seventeen — first Blacklist visit dialog (post-tutorial)
+    //  Triggered the FIRST time Panel_BlackList is opened after the Garage
+    //  tutorial completes (TutorialGate.BottomBarFullyUnlocked == true and
+    //  TutorialSaveData.blacklistTutorialShown == false). Mirrors the
+    //  popup/zoom + Dim style used by Eleven / Thirteen / Fifteen, with a
+    //  tap-anywhere dismiss. Authored RectTransform position/scale are
+    //  preserved across show/hide cycles. Save flag is set ONLY after the
+    //  player dismisses, so a reload while still showing re-triggers next
+    //  time Blacklist opens. No interaction with steps 1–22 — those have all
+    //  completed by the time this can fire.
+    // ═════════════════════════════════════════════════════════════════════════
+
+    private void CacheStepSeventeenOriginalTransform()
+    {
+        if (_seventeenRectTransform == null)
+            _seventeenRectTransform = seventeen != null ? seventeen.GetComponent<RectTransform>() : null;
+        if (_seventeenRectTransform == null) return;
+        if (_seventeenOriginalTransformCached) return;
+        _seventeenOriginalScale = _seventeenRectTransform.localScale;
+        _seventeenOriginalAnchoredPosition = _seventeenRectTransform.anchoredPosition;
+        _seventeenOriginalTransformCached = true;
+    }
+
+    private void RestoreStepSeventeenOriginalTransform()
+    {
+        if (_seventeenRectTransform == null) return;
+        if (!_seventeenOriginalTransformCached) CacheStepSeventeenOriginalTransform();
+        _seventeenRectTransform.localScale = _seventeenOriginalScale;
+        _seventeenRectTransform.anchoredPosition = _seventeenOriginalAnchoredPosition;
+    }
+
+    private Tween ShowStepSeventeenVisual()
+    {
+        if (seventeen == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_seventeenCanvasGroup == null) _seventeenCanvasGroup = GetOrAddCanvasGroup(seventeen);
+        CacheStepSeventeenOriginalTransform();
+
+        seventeen.SetActive(true);
+        if (_seventeenCanvasGroup != null)
+        {
+            _seventeenCanvasGroup.alpha = 0f;
+            _seventeenCanvasGroup.interactable = true;
+            _seventeenCanvasGroup.blocksRaycasts = true;
+        }
+        if (_seventeenRectTransform != null)
+            _seventeenRectTransform.localScale = _seventeenOriginalScale * panelStartScale;
+
+        Sequence show = DOTween.Sequence();
+        show.SetUpdate(true);
+        if (_seventeenRectTransform != null)
+            show.Join(_seventeenRectTransform.DOScale(_seventeenOriginalScale, panelInDuration).SetEase(easeIn));
+        if (_seventeenCanvasGroup != null)
+            show.Join(_seventeenCanvasGroup.DOFade(1f, panelInDuration));
+        return show;
+    }
+
+    private Tween HideStepSeventeenVisual()
+    {
+        if (seventeen == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_seventeenCanvasGroup == null) _seventeenCanvasGroup = GetOrAddCanvasGroup(seventeen);
+        if (_seventeenRectTransform == null) _seventeenRectTransform = seventeen.GetComponent<RectTransform>();
+        CacheStepSeventeenOriginalTransform();
+
+        Sequence hide = DOTween.Sequence();
+        hide.SetUpdate(true);
+        if (_seventeenRectTransform != null)
+            hide.Join(_seventeenRectTransform.DOScale(_seventeenOriginalScale * panelStartScale, panelOutDuration).SetEase(easeOut));
+        if (_seventeenCanvasGroup != null)
+            hide.Join(_seventeenCanvasGroup.DOFade(0f, panelOutDuration));
+        hide.OnComplete(() =>
+        {
+            RestoreStepSeventeenOriginalTransform();
+            if (_seventeenCanvasGroup != null)
+            {
+                _seventeenCanvasGroup.alpha = 0f;
+                _seventeenCanvasGroup.interactable = false;
+                _seventeenCanvasGroup.blocksRaycasts = false;
+            }
+            seventeen.SetActive(false);
+        });
+        return hide;
+    }
+
+    /// <summary>
+    /// Public hook called by <see cref="BlacklistPanelController.OnEnable"/>
+    /// every time Panel_BlackList becomes active. Idempotent: only the FIRST
+    /// open after Garage tutorial completion shows Seventeen; further opens
+    /// (and any open before BottomBar is fully unlocked) are no-ops.
+    /// </summary>
+    public void NotifyBlacklistPanelOpened()
+    {
+        if (_saveData == null) return;
+        // Hard guard: never fire before BottomBar is fully unlocked. The Blacklist
+        // button itself is locked until then so this is a defensive double-check.
+        if (!TutorialGate.BottomBarFullyUnlocked) return;
+        if (_saveData.blacklistTutorialShown) return;
+        if (_isStepSeventeenActive || _isStepSeventeenCompletionInProgress) return;
+
+        StartStepSeventeen();
+    }
+
+    private void StartStepSeventeen()
+    {
+        if (seventeen == null)
+        {
+            Debug.LogWarning("[TutorialMgr][BlacklistTut] StartStepSeventeen: 'seventeen' Inspector field is NULL — assign UI_Tutorial/Seventeen on TutorialManager. Marking as shown to avoid repeated trigger.");
+            if (_saveData != null)
+            {
+                _saveData.blacklistTutorialShown = true;
+                _saveData.Save();
+            }
+            return;
+        }
+
+        _isStepSeventeenActive = true;
+        _canDismissSeventeen = false;
+
+        if (tutorialRoot != null)
+            tutorialRoot.SetActive(true);
+
+        Debug.Log("[TutorialMgr][BlacklistTut] Showing Seventeen");
+
+        Sequence sequence = DOTween.Sequence();
+        sequence.SetUpdate(true);
+        sequence.Join(ShowDim(blockInput: true));
+        sequence.Join(ShowStepSeventeenVisual());
+        sequence.OnComplete(() =>
+        {
+            // Arm dismiss on next frame so the same tap that opened the
+            // Blacklist panel cannot accidentally close Seventeen.
+            StartCoroutine(ArmStepSeventeenDismissOnNextFrame());
+        });
+    }
+
+    private IEnumerator ArmStepSeventeenDismissOnNextFrame()
+    {
+        yield return null;
+        _canDismissSeventeen = true;
+    }
+
+    private void CompleteStepSeventeen()
+    {
+        if (_isStepSeventeenCompletionInProgress) return;
+
+        _isStepSeventeenCompletionInProgress = true;
+        _isStepSeventeenActive = false;
+        _canDismissSeventeen = false;
+
+        Debug.Log("[TutorialMgr][BlacklistTut] Dismissing Seventeen");
+
+        Sequence sequence = DOTween.Sequence();
+        sequence.SetUpdate(true);
+        sequence.Join(HideStepSeventeenVisual());
+        sequence.Join(HideDim());
+        sequence.OnComplete(() =>
+        {
+            _isStepSeventeenCompletionInProgress = false;
+            if (_saveData != null)
+            {
+                _saveData.blacklistTutorialShown = true;
+                _saveData.Save();
+                Debug.Log("[TutorialMgr][BlacklistTut] blacklistTutorialShown=true saved");
+            }
+        });
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Steps 20–22 — Garage Tutorial Segment
+    //  After Step 19 (Thirteen dismissed) the player must be guided to the
+    //  garage:
+    //   20. Btn_Garage reveal (animated) on TopBar; Fourteen pointer loop;
+    //       transparent input blocker so only Btn_Garage is interactable.
+    //   21. Btn_Garage clicked → smooth Fourteen hide + remove blocker; the
+    //       existing GarageSceneLoader.LoadGarageScene UnityEvent listener on
+    //       Btn_Garage handles the scene swap. Persist garageButtonClicked.
+    //   22. NewGarage scene: GarageTutorialController shows Dim+Fifteen,
+    //       tap-anywhere dismiss → fifteenDismissed=true (segment complete).
+    // ═════════════════════════════════════════════════════════════════════════
+
+    private void EnterGarageTutorial()
+    {
+        if (_saveData == null) { Debug.LogWarning("[TutorialMgr][GarageTut] EnterGarageTutorial: _saveData==null, abort."); return; }
+        if (_saveData.fifteenDismissed) { Debug.Log("[TutorialMgr][GarageTut] EnterGarageTutorial: fifteenDismissed=TRUE → skip."); return; }
+
+        Debug.Log($"[TutorialMgr][GarageTut] EnterGarageTutorial: ENTER. btnGarageRoot={(btnGarageRoot != null)} btnGarage={(btnGarage != null)} fourteen={(fourteen != null)} fourteenInputBlocker={(fourteenInputBlocker != null)}");
+        if (btnGarageRoot == null)
+            Debug.LogError("[TutorialMgr][GarageTut] btnGarageRoot NULL — assign Inspector field 'Btn Garage Root'.");
+        if (btnGarage == null)
+            Debug.LogError("[TutorialMgr][GarageTut] btnGarage NULL — assign Inspector field 'Btn Garage' (Button component).");
+        if (fourteen == null)
+            Debug.LogError("[TutorialMgr][GarageTut] fourteen NULL — assign Inspector field 'Fourteen'.");
+
+        ShowBtnGarageAnimated();
+
+        DOVirtual.DelayedCall(garageTutorialOpenDelay, () =>
+        {
+            if (_saveData == null || _saveData.garageButtonClicked || _saveData.fifteenDismissed) return;
+            if (fourteenInputBlocker != null) fourteenInputBlocker.SetActive(true);
+            Sequence open = DOTween.Sequence();
+            open.SetUpdate(true);
+            open.Join(ShowStepFourteenVisual());
+            open.OnComplete(() => StartStepFourteenLoopAnimation());
+            RegisterBtnGarageListener();
+            Debug.Log("[TutorialMgr][GarageReveal] Fourteen shown");
+            Debug.Log("[TutorialMgr][GarageTut] Fourteen shown");
+        }, true).SetUpdate(true);
+    }
+
+    private void ApplyGarageTutorialStateImmediate()
+    {
+        if (_saveData == null) return;
+
+        Debug.Log($"[TutorialMgr][GarageTut] ApplyGarageTutorialStateImmediate: garageButtonClicked={_saveData.garageButtonClicked} fifteenDismissed={_saveData.fifteenDismissed}");
+
+        // Btn_Garage must be visible immediately (no animation) on reload.
+        ShowBtnGarageImmediate();
+
+        // Reset transient visuals.
+        StopStepFourteenLoopAnimation(restoreTransform: true);
+        SetStepFourteenVisibleImmediate(false);
+        if (fourteenInputBlocker != null) fourteenInputBlocker.SetActive(false);
+
+        // If the player has already clicked Btn_Garage, the segment is in the
+        // NewGarage-scene phase (handled by GarageTutorialController). Nothing
+        // else to do in Main.
+        if (_saveData.garageButtonClicked)
+        {
+            Debug.Log("[TutorialMgr][GarageTut] Branch=Step22 (awaiting Fifteen dismiss in NewGarage).");
+            return;
+        }
+
+        // Step 20 — re-show Fourteen pointer + blocker; re-arm Btn_Garage listener.
+        Debug.Log("[TutorialMgr][GarageTut] Branch=Step20 (re-show Fourteen pointer + blocker).");
+        if (fourteenInputBlocker != null) fourteenInputBlocker.SetActive(true);
+        SetStepFourteenVisibleImmediate(true);
+        StartStepFourteenLoopAnimation();
+        RegisterBtnGarageListener();
+    }
+
+    private void RegisterBtnGarageListener()
+    {
+        if (_isGarageButtonListenerRegistered || btnGarage == null) return;
+        btnGarage.onClick.AddListener(HandleBtnGarageClickedForStepTwentyOne);
+        _isGarageButtonListenerRegistered = true;
+        Debug.Log("[TutorialMgr][GarageTut] RegisterBtnGarageListener: listener attached.");
+    }
+
+    private void UnregisterBtnGarageListener()
+    {
+        if (!_isGarageButtonListenerRegistered || btnGarage == null) return;
+        btnGarage.onClick.RemoveListener(HandleBtnGarageClickedForStepTwentyOne);
+        _isGarageButtonListenerRegistered = false;
+    }
+
+    private void HandleBtnGarageClickedForStepTwentyOne()
+    {
+        if (_saveData == null) return;
+        if (_saveData.garageButtonClicked) return;
+
+        Debug.Log("[TutorialMgr][GarageTut] HandleBtnGarageClickedForStepTwentyOne: Btn_Garage clicked → persist garageButtonClicked + smooth Fourteen hide.");
+
+        _saveData.garageButtonClicked = true;
+        _saveData.currentStepIndex = Mathf.Max(_saveData.currentStepIndex, 21);
+        _saveData.Save();
+
+        UnregisterBtnGarageListener();
+        StopStepFourteenLoopAnimation(restoreTransform: true);
+        if (fourteenInputBlocker != null) fourteenInputBlocker.SetActive(false);
+
+        Sequence close = DOTween.Sequence();
+        close.SetUpdate(true);
+        close.Join(HideStepFourteenVisual());
+        // The existing GarageSceneLoader.LoadGarageScene UnityEvent persistent
+        // listener on Btn_Garage handles the actual scene swap; we just clean
+        // up the tutorial UI here.
+    }
+
+    // ── Btn_Garage reveal (mirrors PopularityBar pattern) ──
+
+    private void CacheBtnGarageOriginalTransform()
+    {
+        if (_btnGarageRectTransform == null) return;
+        if (_btnGarageOriginalTransformCached) return;
+        _btnGarageOriginalScale = _btnGarageRectTransform.localScale;
+        _btnGarageOriginalTransformCached = true;
+    }
+
+    /// <summary>
+    /// Authoritative Btn_Garage visibility gate. Forces btnGarageRoot inactive
+    /// any time the police tutorial has not fully completed (i.e. chase still
+    /// active OR awaiting OnChaseEnded). Never reveals on its own — that path
+    /// goes through ShowBtnGarageImmediate / ShowBtnGarageAnimated.
+    /// </summary>
+    private void ApplyBtnGarageGateVisibility(string callSite)
+    {
+        if (btnGarageRoot == null) return;
+        if (_saveData == null) return;
+
+        bool chaseActive = PoliceCatchController.Instance != null && PoliceCatchController.Instance.IsChaseActive;
+        bool policeDone = _saveData.thirteenDismissed && !_isAwaitingGarageTutorialAfterChase && !chaseActive;
+        bool garageUnlocked = _saveData.garageTutorialQueued || _saveData.fifteenDismissed;
+        bool activeBefore = btnGarageRoot.activeSelf;
+        bool shouldShow = garageUnlocked && policeDone;
+
+        // Gate only force-hides. Reveal is owned by ShowBtnGarageImmediate /
+        // ShowBtnGarageAnimated, which are called from EnterGarageTutorial
+        // (post-OnChaseEnded) or HandleGameLoaded routing.
+        if (!shouldShow && activeBefore)
+        {
+            Debug.Log($"[TutorialMgr][GarageDebug] StepIndex={_saveData.currentStepIndex}, policeDone={policeDone}, radarDone={_saveData.radarUnlocked}, garageUnlocked={garageUnlocked}");
+            Debug.Log($"[TutorialMgr][GarageDebug] Btn_Garage activeBefore={activeBefore} activeAfter=False (callSite={callSite})");
+            Debug.Log($"[TutorialMgr][GarageTut] Btn_Garage visibility check ({callSite}): stepIdx={_saveData.currentStepIndex} policeDone={policeDone} garageUnlocked={garageUnlocked} activeBefore={activeBefore} activeAfter=False");
+            Debug.Log($"[TutorialMgr][GarageTut] Forcing Btn_Garage hidden before police completion (callSite={callSite})");
+            Debug.Log("[TutorialMgr][GarageDebug] Setting Btn_Garage INACTIVE (gate force-hide)");
+            btnGarageRoot.SetActive(false);
+            return;
+        }
+
+        // No-op log so reveals are visible in the timeline.
+        Debug.Log($"[TutorialMgr][GarageTut] Btn_Garage visibility check ({callSite}): stepIdx={_saveData.currentStepIndex} policeDone={policeDone} garageUnlocked={garageUnlocked} activeBefore={activeBefore} activeAfter={activeBefore}");
+    }
+
+    private void ShowBtnGarageImmediate()
+    {
+        if (btnGarageRoot == null)
+        {
+            Debug.LogError("[TutorialMgr][GarageTut] ShowBtnGarageImmediate: btnGarageRoot NULL — assign Inspector field. Aborting.");
+            return;
+        }
+        CacheBtnGarageOriginalTransform();
+
+        Debug.Log("[TutorialMgr][GarageTut] Revealing Btn_Garage after police completion (immediate)");
+        Debug.Log("[TutorialMgr][GarageDebug] Setting Btn_Garage ACTIVE (ShowBtnGarageImmediate)\n" + System.Environment.StackTrace);
+        btnGarageRoot.SetActive(true);
+        if (_btnGarageRectTransform != null)
+            _btnGarageRectTransform.localScale = _btnGarageOriginalScale;
+        if (_btnGarageCanvasGroup != null)
+        {
+            _btnGarageCanvasGroup.alpha = 1f;
+            _btnGarageCanvasGroup.interactable = true;
+            _btnGarageCanvasGroup.blocksRaycasts = true;
+        }
+
+        // Hand Btn_Garage ownership back to TopBarAnimator. From now on it is a
+        // normal TopBar hideGroup member (compact/expand cycles include it).
+        TutorialGate.SetBtnGarageOwnedByTutorial(false);
+        Debug.Log("[TutorialMgr][GarageReveal] Btn_Garage ownership released to TopBarAnimator (immediate path)");
+    }
+
+    private void ShowBtnGarageAnimated()
+    {
+        if (btnGarageRoot == null)
+        {
+            Debug.LogError("[TutorialMgr][GarageTut] ShowBtnGarageAnimated: btnGarageRoot NULL — assign Inspector field 'Btn Garage Root'. Aborting.");
+            return;
+        }
+        CacheBtnGarageOriginalTransform();
+
+        Debug.Log("[TutorialMgr][GarageReveal] Starting dedicated Btn_Garage reveal");
+        Debug.Log("[TutorialMgr][GarageTut] Revealing Btn_Garage after police completion (animated)");
+        Debug.Log("[TutorialMgr][GarageDebug] ShowBtnGarageAnimated final reveal");
+        Debug.Log("[TutorialMgr][GarageDebug] Setting Btn_Garage ACTIVE (ShowBtnGarageAnimated)\n" + System.Environment.StackTrace);
+        btnGarageRoot.SetActive(true);
+
+        if (_btnGarageCanvasGroup != null)
+        {
+            _btnGarageCanvasGroup.alpha = 0f;
+            _btnGarageCanvasGroup.interactable = false;
+            _btnGarageCanvasGroup.blocksRaycasts = false;
+        }
+
+        if (_btnGarageRectTransform != null)
+            _btnGarageRectTransform.localScale = _btnGarageOriginalScale * premiumStartScale;
+
+        Sequence intro = DOTween.Sequence();
+        intro.SetUpdate(true);
+        if (_btnGarageRectTransform != null)
+            intro.Join(_btnGarageRectTransform.DOScale(_btnGarageOriginalScale, premiumIntroDuration).SetEase(premiumIntroEase));
+        if (_btnGarageCanvasGroup != null)
+            intro.Join(_btnGarageCanvasGroup.DOFade(1f, premiumIntroDuration));
+
+        intro.OnComplete(() =>
+        {
+            if (_btnGarageCanvasGroup != null)
+            {
+                _btnGarageCanvasGroup.interactable = true;
+                _btnGarageCanvasGroup.blocksRaycasts = true;
+            }
+            // Hand Btn_Garage ownership back to TopBarAnimator. From now on it is a
+            // normal TopBar hideGroup member (compact/expand cycles include it).
+            TutorialGate.SetBtnGarageOwnedByTutorial(false);
+            Debug.Log("[TutorialMgr][GarageReveal] Btn_Garage reveal complete");
+            Debug.Log("[TutorialMgr][GarageTut] ShowBtnGarageAnimated COMPLETE.");
+        });
+    }
+
+    // ── Fourteen pointer (mirrors Twelve pattern) ──
+
+    private void CacheStepFourteenOriginalTransform()
+    {
+        if (_fourteenRectTransform == null)
+            _fourteenRectTransform = fourteen != null ? fourteen.GetComponent<RectTransform>() : null;
+        if (_fourteenRectTransform == null) return;
+        if (_fourteenOriginalTransformCached) return;
+        _fourteenOriginalScale = _fourteenRectTransform.localScale;
+        _fourteenOriginalAnchoredPosition = _fourteenRectTransform.anchoredPosition;
+        _fourteenOriginalTransformCached = true;
+    }
+
+    private void RestoreStepFourteenOriginalTransform()
+    {
+        if (_fourteenRectTransform == null) return;
+        if (!_fourteenOriginalTransformCached) CacheStepFourteenOriginalTransform();
+        _fourteenRectTransform.localScale = _fourteenOriginalScale;
+        _fourteenRectTransform.anchoredPosition = _fourteenOriginalAnchoredPosition;
+    }
+
+    private void SetStepFourteenVisibleImmediate(bool visible)
+    {
+        if (fourteen == null) return;
+        if (_fourteenCanvasGroup == null) _fourteenCanvasGroup = GetOrAddCanvasGroup(fourteen);
+        CacheStepFourteenOriginalTransform();
+
+        if (visible)
+        {
+            fourteen.SetActive(true);
+            RestoreStepFourteenOriginalTransform();
+            if (_fourteenCanvasGroup != null)
+            {
+                _fourteenCanvasGroup.alpha = 1f;
+                _fourteenCanvasGroup.interactable = false;
+                _fourteenCanvasGroup.blocksRaycasts = false;
+            }
+        }
+        else
+        {
+            if (_fourteenCanvasGroup != null)
+            {
+                _fourteenCanvasGroup.alpha = 0f;
+                _fourteenCanvasGroup.interactable = false;
+                _fourteenCanvasGroup.blocksRaycasts = false;
+            }
+            fourteen.SetActive(false);
+        }
+    }
+
+    private Tween ShowStepFourteenVisual()
+    {
+        if (fourteen == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_fourteenCanvasGroup == null) _fourteenCanvasGroup = GetOrAddCanvasGroup(fourteen);
+        CacheStepFourteenOriginalTransform();
+
+        fourteen.SetActive(true);
+        if (_fourteenCanvasGroup != null)
+        {
+            _fourteenCanvasGroup.alpha = 0f;
+            _fourteenCanvasGroup.interactable = false;
+            _fourteenCanvasGroup.blocksRaycasts = false;
+        }
+        Image fourteenImage = fourteen.GetComponent<Image>();
+        if (fourteenImage != null) fourteenImage.raycastTarget = false;
+
+        if (_fourteenRectTransform != null)
+            _fourteenRectTransform.localScale = _fourteenOriginalScale * panelStartScale;
+
+        Sequence show = DOTween.Sequence();
+        show.SetUpdate(true);
+        if (_fourteenRectTransform != null)
+            show.Join(_fourteenRectTransform.DOScale(_fourteenOriginalScale, panelInDuration).SetEase(easeIn));
+        if (_fourteenCanvasGroup != null)
+            show.Join(_fourteenCanvasGroup.DOFade(1f, panelInDuration));
+        return show;
+    }
+
+    private Tween HideStepFourteenVisual()
+    {
+        if (fourteen == null)
+            return DOVirtual.DelayedCall(0f, () => { }).SetUpdate(true);
+        if (_fourteenCanvasGroup == null) _fourteenCanvasGroup = GetOrAddCanvasGroup(fourteen);
+        if (_fourteenRectTransform == null) _fourteenRectTransform = fourteen.GetComponent<RectTransform>();
+        CacheStepFourteenOriginalTransform();
+
+        Sequence hide = DOTween.Sequence();
+        hide.SetUpdate(true);
+        if (_fourteenRectTransform != null)
+            hide.Join(_fourteenRectTransform.DOScale(_fourteenOriginalScale * panelStartScale, panelOutDuration).SetEase(easeOut));
+        if (_fourteenCanvasGroup != null)
+            hide.Join(_fourteenCanvasGroup.DOFade(0f, panelOutDuration));
+        hide.OnComplete(() =>
+        {
+            RestoreStepFourteenOriginalTransform();
+            fourteen.SetActive(false);
+        });
+        return hide;
+    }
+
+    private void StartStepFourteenLoopAnimation()
+    {
+        StopStepFourteenLoopAnimation(restoreTransform: true);
+        if (fourteen == null || !fourteen.activeInHierarchy) return;
+        if (_fourteenRectTransform == null) _fourteenRectTransform = fourteen.GetComponent<RectTransform>();
+        if (_fourteenRectTransform == null) return;
+
+        CacheStepFourteenOriginalTransform();
+        RestoreStepFourteenOriginalTransform();
+
+        Vector3 pulseScale = _fourteenOriginalScale * (1f + stepTwoPulseScalePercent);
+        Vector2 bouncePos = _fourteenOriginalAnchoredPosition + Vector2.up * stepTwoBounceDistance;
+
+        _stepFourteenLoopSequence = DOTween.Sequence();
+        _stepFourteenLoopSequence.SetUpdate(true);
+        _stepFourteenLoopSequence.Join(_fourteenRectTransform.DOScale(pulseScale, stepTwoLoopDuration).SetEase(Ease.InOutSine));
+        _stepFourteenLoopSequence.Join(_fourteenRectTransform.DOAnchorPos(bouncePos, stepTwoLoopDuration).SetEase(Ease.InOutSine));
+        _stepFourteenLoopSequence.SetLoops(-1, LoopType.Yoyo);
+    }
+
+    private void StopStepFourteenLoopAnimation(bool restoreTransform)
+    {
+        if (_stepFourteenLoopSequence != null)
+        {
+            _stepFourteenLoopSequence.Kill();
+            _stepFourteenLoopSequence = null;
+        }
+        if (restoreTransform)
+            RestoreStepFourteenOriginalTransform();
     }
 }

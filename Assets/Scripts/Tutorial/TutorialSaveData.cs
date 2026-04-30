@@ -73,6 +73,32 @@ public class TutorialSaveData
     /// <summary>True once Clicker has been pressed after Ten completed, resuming the suspended free-chest pipeline (Step 12 done).</summary>
     public bool cardsSegmentClickerPressed = false;
 
+    // ── Steps 14–19 : Radar + Police tutorial segment (after the 3rd free Common Chest opens) ──
+    /// <summary>True once the 3rd free Common Chest has been opened and the radar tutorial segment has been queued. Drives PopularityBar reveal and tutorial radar force-spawn on Main return.</summary>
+    public bool radarTutorialQueued = false;
+    /// <summary>True once the deterministic tutorial Radar has been force-spawned at least once during this segment.</summary>
+    public bool firstTutorialRadarSpawned = false;
+    /// <summary>True once the player has tapped the deterministic tutorial Radar (Step 16 entered).</summary>
+    public bool radarTutorialTapped = false;
+    /// <summary>True once UI_Tutorial/Eleven and UI_Tutorial/Twelve have been dismissed (Step 17 done).</summary>
+    public bool elevenTwelveDismissed = false;
+    /// <summary>True once <see cref="PoliceCatchTrigger.ForceTutorialChase"/> has been invoked for the tutorial chase (Step 18 entered).</summary>
+    public bool policeTutorialChaseStarted = false;
+    /// <summary>True once UI_Tutorial/Thirteen has been dismissed and police chase has been permanently unlocked (Step 19 done — segment complete).</summary>
+    public bool thirteenDismissed = false;
+
+    // ── Steps 20–22 : Garage tutorial segment (Btn_Garage reveal → Fourteen pointer → NewGarage Fifteen) ──
+    /// <summary>True once Step 19 finished (Thirteen dismissed) and the Garage tutorial segment has been queued. Drives Btn_Garage animated reveal and Fourteen pointer on Main return.</summary>
+    public bool garageTutorialQueued = false;
+    /// <summary>True once the player has clicked Btn_Garage during Step 20 (Step 21 done). Drives NewGarage Dim+Fifteen popup.</summary>
+    public bool garageButtonClicked = false;
+    /// <summary>True once UI_Tutorial/Fifteen has been dismissed in NewGarage (Step 22 done — segment complete).</summary>
+    public bool fifteenDismissed = false;
+
+    // ── Post-tutorial: first Blacklist visit dialogue (UI_Tutorial/Seventeen) ──
+    /// <summary>True once UI_Tutorial/Seventeen has been shown and dismissed on the first Blacklist panel open after Garage tutorial completion. Set only after the player taps to dismiss; reload before dismissal lets it re-trigger on the next Blacklist open.</summary>
+    public bool blacklistTutorialShown = false;
+
     public static TutorialSaveData Load()
     {
         if (!PlayerPrefs.HasKey(PrefsKey))

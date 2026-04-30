@@ -13,13 +13,57 @@ public enum RadarSide { Left, Right }
 /// </summary>
 public class Radar : MonoBehaviour
 {
+    /// <summary>
+    /// Fired when the deterministic tutorial Radar crosses its configured Z
+    /// freeze threshold (toward the camera). Used by <see cref="TutorialManager"/>
+    /// to freeze gameplay and start the idle bounce loop on the radar.
+    /// </summary>
+    public static event System.Action<Radar> OnTutorialRadarReachedCenter;
+
+    /// <summary>
+    /// Fired when the deterministic tutorial Radar is tapped by the player.
+    /// Used by <see cref="TutorialManager"/> to open the Eleven/Twelve popups.
+    /// </summary>
+    public static event System.Action<Radar> OnTutorialRadarTapped;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticsRadar()
+    {
+        OnTutorialRadarReachedCenter = null;
+        OnTutorialRadarTapped = null;
+    }
+
     /// <summary>Which side this radar was spawned on (set by RadarSpawner).</summary>
     public RadarSide Side { get; private set; }
+
+    /// <summary>True when this radar is the deterministic tutorial Radar.</summary>
+    public bool IsTutorialRadar { get; private set; }
+    private float _tutorialFreezeZ;
+    private bool _tutorialCenterTriggered;
+    private float _tutorialMoveDirSign;
+    private Tween _tutorialBounceTween;
+    private Vector3 _tutorialBounceBaseScale;
 
     /// <summary>Called by RadarSpawner right after instantiation.</summary>
     public void Init(RadarSide side)
     {
         Side = side;
+    }
+
+    /// <summary>
+    /// Marks this radar as the deterministic tutorial Radar. Spawner calls this
+    /// immediately after Instantiate. The radar will, on its way down, raise
+    /// <see cref="OnTutorialRadarReachedCenter"/> when it crosses
+    /// <paramref name="freezeZ"/> toward the camera and start a subtle bounce loop.
+    /// </summary>
+    public void MarkAsTutorialRadar(float freezeZ)
+    {
+        IsTutorialRadar = true;
+        _tutorialFreezeZ = freezeZ;
+        _tutorialCenterTriggered = false;
+        _tutorialMoveDirSign = Mathf.Sign(freezeZ - transform.position.z);
+        if (_tutorialMoveDirSign == 0f) _tutorialMoveDirSign = -1f;
+        Debug.Log($"[RadarSpawner][RadarTut] MarkAsTutorialRadar: name='{name}' pos={transform.position} freezeZ={freezeZ} dirSign={_tutorialMoveDirSign}");
     }
 
     // ==================== CONFIGURATION ====================
@@ -55,6 +99,24 @@ public class Radar : MonoBehaviour
     {
         if (!isAlive) return;
 
+        // Tutorial radar: detect Z-center crossing once, then halt and notify.
+        if (IsTutorialRadar && !_tutorialCenterTriggered)
+        {
+            bool crossed = (_tutorialMoveDirSign > 0f && transform.position.z >= _tutorialFreezeZ) ||
+                           (_tutorialMoveDirSign < 0f && transform.position.z <= _tutorialFreezeZ);
+            if (crossed)
+            {
+                _tutorialCenterTriggered = true;
+                StartTutorialBounce();
+                Debug.Log($"[RadarSpawner][RadarTut] Tutorial radar reached center: name='{name}' pos={transform.position} freezeZ={_tutorialFreezeZ}. Firing OnTutorialRadarReachedCenter.");
+                OnTutorialRadarReachedCenter?.Invoke(this);
+                return;
+            }
+        }
+
+        // Tutorial radar: once at center, never move further until tapped.
+        if (IsTutorialRadar && _tutorialCenterTriggered) return;
+
         // Tutorial gating: hold position while gameplay is frozen.
         if (TutorialGate.GameplayFrozen) return;
 
@@ -65,6 +127,30 @@ public class Radar : MonoBehaviour
         if (transform.position.z <= despawnZ)
         {
             OnMissed();
+        }
+    }
+
+    private void StartTutorialBounce()
+    {
+        if (_tutorialBounceTween != null && _tutorialBounceTween.IsActive())
+            return;
+
+        _tutorialBounceBaseScale = transform.localScale;
+        Vector3 peak = _tutorialBounceBaseScale * 1.18f;
+
+        _tutorialBounceTween = transform
+            .DOScale(peak, 0.55f)
+            .SetEase(Ease.InOutSine)
+            .SetLoops(-1, LoopType.Yoyo)
+            .SetUpdate(true);
+    }
+
+    private void StopTutorialBounce()
+    {
+        if (_tutorialBounceTween != null)
+        {
+            _tutorialBounceTween.Kill();
+            _tutorialBounceTween = null;
         }
     }
 
@@ -87,7 +173,15 @@ public class Radar : MonoBehaviour
             if (SFXManager.Instance != null)
                 SFXManager.Instance.PlayRadarDefuse();
 
-            if (PopularityManager.Instance != null)
+            // Tutorial radar: deterministic event — do NOT mutate popularity or
+            // notify radar-defused listeners (would skew AmbientHeat/PoliceCatch).
+            if (IsTutorialRadar)
+            {
+                StopTutorialBounce();
+                Debug.Log($"[RadarSpawner][RadarTut] Tutorial radar tapped: name='{name}'. GameplayFrozen={TutorialGate.GameplayFrozen}. Firing OnTutorialRadarTapped.");
+                OnTutorialRadarTapped?.Invoke(this);
+            }
+            else if (PopularityManager.Instance != null)
             {
                 PopularityManager.Instance.AddPopularityNormalized(
                     -popularityDelta, "RadarDefuse", this);
@@ -179,6 +273,7 @@ public class Radar : MonoBehaviour
     private void OnDestroy()
     {
         // Kill any lingering DOTween animations on this transform
+        StopTutorialBounce();
         transform.DOKill();
     }
 }

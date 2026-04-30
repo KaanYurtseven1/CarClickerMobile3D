@@ -49,14 +49,23 @@ public class BottomBarController : MonoBehaviour
     {
         if (_rankingButton == null) return;
 
-        bool isUnlocked = RankingService.Instance != null && RankingService.Instance.IsRankingUnlocked;
-        _rankingButton.interactable = isUnlocked;
+        // Ranking tab requires BOTH gates to be open:
+        //   1. RankingService says ranking is unlocked (existing gameplay gate).
+        //   2. The player has completed the FIRST Garage tutorial visit
+        //      (TutorialGate.BottomBarFullyUnlocked, mirrors fifteenDismissed).
+        // Either one missing → tab stays locked. This must NOT bypass
+        // RankingService — the tutorial gate is layered on top.
+        bool rankingSystemUnlocked = RankingService.Instance != null && RankingService.Instance.IsRankingUnlocked;
+        bool garageDone = TutorialGate.BottomBarFullyUnlocked;
+        _rankingButton.interactable = rankingSystemUnlocked && garageDone;
     }
 
     private void OnPlayerBecameRanked()
     {
-        if (_rankingButton != null)
-            _rankingButton.interactable = true;
+        // Re-evaluate via the gated path so the Garage-tutorial condition is
+        // honoured even if the player gets ranked before completing the
+        // Garage tutorial.
+        UpdateRankingTabInteractable();
     }
 
     public void SetActiveTab(int index)

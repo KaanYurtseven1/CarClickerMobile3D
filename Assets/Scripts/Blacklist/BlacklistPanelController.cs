@@ -73,6 +73,13 @@ public class BlacklistPanelController : MonoBehaviour
 
         BuildUI();
         _nextRefreshTime = Time.unscaledTime + refreshInterval;
+
+        // Notify TutorialManager so the post-tutorial first-Blacklist dialog
+        // (UI_Tutorial/Seventeen) can fire on the FIRST open after the Garage
+        // tutorial completes. The manager itself idempotently guards against
+        // re-trigger, so calling on every OnEnable is safe.
+        if (TutorialManager.Instance != null)
+            TutorialManager.Instance.NotifyBlacklistPanelOpened();
     }
 
     private void OnDisable()

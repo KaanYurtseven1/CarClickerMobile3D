@@ -1847,6 +1847,59 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 172413911}
   m_CullTransparentMesh: 1
+--- !u!1 &183759682
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 183759684}
+  - component: {fileID: 183759683}
+  m_Layer: 0
+  m_Name: GarageTutorial
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &183759683
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 183759682}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7e59e6e01164854e8af09ea7dbc4888, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GarageTutorialController
+  dim: {fileID: 273033009}
+  fifteen: {fileID: 165059283}
+  popupOpenDelay: 0.3
+  introDuration: 0.35
+  outroDuration: 0.2
+  startScale: 0.9
+  easeIn: 27
+  easeOut: 26
+  dimMaxAlpha: 0.7
+--- !u!4 &183759684
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 183759682}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!23 &190490584 stripped
 MeshRenderer:
   m_CorrespondingSourceObject: {fileID: 6113532003684452955, guid: 1e3df311e86adbc4f8cda5c151df868c, type: 3}
@@ -20313,3 +20366,4 @@ SceneRoots:
   - {fileID: 404260304}
   - {fileID: 551972147}
   - {fileID: 349597651}
+  - {fileID: 183759684}

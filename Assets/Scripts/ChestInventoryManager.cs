@@ -534,9 +534,11 @@ public class ChestInventoryManager : MonoBehaviour
         int prior = data.tutorialFreeChestOpenedCount;
         int next = Mathf.Min(prior + 1, TutorialGate.TutorialFreeChestQuota);
         Debug.Log($"[ChestInvMgr][TutorialFree] BumpTutorialFreeChestOpenedCount: prior={prior} → next={next} (quota={TutorialGate.TutorialFreeChestQuota}) flags chestUnlocked={data.chestUnlocked} tutorialChestCollected={data.tutorialChestCollected} chestSlotTutorialShown={data.chestSlotTutorialShown} firstTutorialPopupShown={data.firstTutorialPopupShown}");
+        Debug.Log($"[ChestInvMgr][RadarTut] BumpTutorialFreeChestOpenedCount entry: prior={prior} next={next} willBeQuota={(next == TutorialGate.TutorialFreeChestQuota)} radarFlags(queued={data.radarTutorialQueued}, firstSpawned={data.firstTutorialRadarSpawned}, tapped={data.radarTutorialTapped}, elevenDismissed={data.elevenTwelveDismissed}, chaseStarted={data.policeTutorialChaseStarted}, thirteenDismissed={data.thirteenDismissed}) radarUnlocked={data.radarUnlocked} policeLocked={data.policeLocked}");
         if (next == prior)
         {
             Debug.Log($"[ChestInvMgr] Tutorial-free open: count already at {prior}, no-op.");
+            Debug.Log($"[ChestInvMgr][RadarTut] No-op (already at quota). radarTutorialQueued stays {data.radarTutorialQueued}.");
             return;
         }
         data.tutorialFreeChestOpenedCount = next;
@@ -552,9 +554,30 @@ public class ChestInventoryManager : MonoBehaviour
             Debug.Log("[ChestInvMgr][TutorialFree] postFirstChestShopTutorialPending = TRUE (first free chest just opened).");
         }
 
+        // The (quota-1) → quota transition (currently 2 → 3) is the canonical
+        // "third free chest just got opened" edge. Queue the Radar/Police
+        // tutorial segment (Steps 14–19) here, in ChestOpenScene's DDoL path,
+        // because TutorialManager (a Main-scene object) is destroyed during
+        // the scene swap and cannot observe OnChestRemovedAfterOpen in time.
+        // Persisted here so Main reload picks it up via TutorialSaveData.Load()
+        // and routes through ApplyRadarPoliceTutorialStateImmediate.
+        if (next == TutorialGate.TutorialFreeChestQuota
+            && !data.radarTutorialQueued
+            && !data.thirteenDismissed)
+        {
+            data.radarTutorialQueued = true;
+            data.currentStepIndex = Mathf.Max(data.currentStepIndex, 14);
+            Debug.Log($"[ChestInvMgr][RadarTut] 2→3 edge reached. radarTutorialQueued = TRUE, currentStepIndex≥14 (now={data.currentStepIndex}). Will route through Step 14 on Main reload.");
+        }
+        else if (next == TutorialGate.TutorialFreeChestQuota)
+        {
+            Debug.Log($"[ChestInvMgr][RadarTut] Quota reached but NOT setting queue (already queued={data.radarTutorialQueued}, thirteenDismissed={data.thirteenDismissed}).");
+        }
+
         data.Save();
         TutorialGate.SetTutorialFreeChestOpenedCount(next);
         Debug.Log($"[ChestInvMgr] Tutorial-free chest opened. count={next}/{TutorialGate.TutorialFreeChestQuota} (saved+gated)");
+        Debug.Log($"[ChestInvMgr][RadarTut] Save() complete. Persisted radarTutorialQueued={data.radarTutorialQueued} currentStepIndex={data.currentStepIndex}.");
     }
 
     /// <summary>

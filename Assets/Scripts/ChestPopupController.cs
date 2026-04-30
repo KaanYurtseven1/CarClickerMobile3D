@@ -1,8 +1,13 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using DG.Tweening;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 public class ChestPopupController : MonoBehaviour
 {
@@ -113,6 +118,70 @@ public class ChestPopupController : MonoBehaviour
     private void Update()
     {
         if (IsPopupOpen && !_isAnimating) RefreshUI();
+
+        // [DIAG] Raycast debug: every frame the popup is open, if any pointer was
+        // pressed this frame, dump the top UI hits so we can see what is
+        // swallowing the click. TEMPORARY — remove once the bug is identified.
+        if (IsPopupOpen && WasAnyPointerPressedThisFrame(out Vector2 screenPos))
+            LogPopupRaycastUnderPointer(screenPos);
+    }
+
+    /// <summary>[DIAG TEMP] Returns true if a mouse/touch was pressed this frame, with screen pos.</summary>
+    private static bool WasAnyPointerPressedThisFrame(out Vector2 screenPos)
+    {
+        screenPos = default;
+#if ENABLE_INPUT_SYSTEM
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+        { screenPos = Mouse.current.position.ReadValue(); return true; }
+        if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasPressedThisFrame)
+        { screenPos = Touchscreen.current.primaryTouch.position.ReadValue(); return true; }
+#endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+        if (Input.GetMouseButtonDown(0)) { screenPos = Input.mousePosition; return true; }
+        if (Input.touchCount > 0)
+        {
+            var t = Input.GetTouch(0);
+            if (t.phase == UnityEngine.TouchPhase.Began) { screenPos = t.position; return true; }
+        }
+#endif
+        return false;
+    }
+
+    /// <summary>[DIAG TEMP] EventSystem.RaycastAll under pointer; log top 10 hits + raycast-relevant components.</summary>
+    private static void LogPopupRaycastUnderPointer(Vector2 screenPos)
+    {
+        if (EventSystem.current == null)
+        {
+            Debug.LogWarning("[ChestPopup][Raycast] EventSystem.current is NULL — no UI input possible.");
+            return;
+        }
+        var ped = new PointerEventData(EventSystem.current) { position = screenPos };
+        var hits = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(ped, hits);
+        Debug.Log($"[ChestPopup][Raycast] pointer={screenPos} hitCount={hits.Count}");
+        int n = Mathf.Min(10, hits.Count);
+        for (int i = 0; i < n; i++)
+        {
+            var go = hits[i].gameObject;
+            string btn = go.GetComponent<Button>() != null ? "Button" : "-";
+            var img = go.GetComponent<Image>();
+            string imgRT = img != null ? img.raycastTarget.ToString() : "<no Image>";
+            var rawImg = go.GetComponent<RawImage>();
+            string rawRT = rawImg != null ? rawImg.raycastTarget.ToString() : "<no RawImage>";
+            var cg = go.GetComponentInParent<CanvasGroup>();
+            string cgs = cg != null ? $"cg(blocks={cg.blocksRaycasts} interactable={cg.interactable} alpha={cg.alpha} on={cg.gameObject.name})" : "cg=<none>";
+            Debug.Log($"[ChestPopup][Raycast] hit[{i}]={GetHierarchyPath(go.transform)} comp={btn} imgRT={imgRT} rawRT={rawRT} {cgs}");
+        }
+    }
+
+    private static string GetHierarchyPath(Transform t)
+    {
+        if (t == null) return "<null>";
+        var sb = new System.Text.StringBuilder(t.name);
+        var p = t.parent;
+        int safety = 0;
+        while (p != null && safety++ < 10) { sb.Insert(0, p.name + "/"); p = p.parent; }
+        return sb.ToString();
     }
 
     // ======= PUBLIC API =======
@@ -122,25 +191,28 @@ public class ChestPopupController : MonoBehaviour
     {
         if (_isAnimating) return;
 
-        Debug.Log($"[ChestPopup] ShowPopupForChest({chestIndex}) called");
+        Debug.Log($"[ChestPopup][Show] ShowPopupForChest({chestIndex}) called");
         _selectedIndex = chestIndex;
         if (popupRoot == null)
         {
-            Debug.LogError("[ChestPopup] popupRoot is NULL! Assign PopupRoot in the ChestPopupController inspector.");
+            Debug.LogError("[ChestPopup][Show] popupRoot is NULL! Assign PopupRoot in the ChestPopupController inspector.");
             return;
         }
 
         // Diagnostic: report the exact ChestData the popup is about to render.
+        ChestInventoryManager.ChestData diag = null;
         if (ChestInventoryManager.Instance != null)
-        {
-            var diag = ChestInventoryManager.Instance.GetChestAt(chestIndex);
-            if (diag != null)
-                Debug.Log($"[ChestPopup][TutorialFree] ShowPopupForChest data: type={diag.chestType} state={diag.state} isTutorialFreeChest={diag.isTutorialFreeChest}");
-            else
-                Debug.LogWarning($"[ChestPopup][TutorialFree] ShowPopupForChest data: NULL at index {chestIndex}");
-        }
+            diag = ChestInventoryManager.Instance.GetChestAt(chestIndex);
+        bool firstTutShown = TutorialSaveData.Load().firstTutorialPopupShown;
+        if (diag != null)
+            Debug.Log($"[ChestPopup][Show] chest idx={chestIndex} type={diag.chestType} state={diag.state} isTutorialFreeChest={diag.isTutorialFreeChest} firstTutorialPopupShown={firstTutShown}");
+        else
+            Debug.LogWarning($"[ChestPopup][Show] ChestData NULL at index {chestIndex} firstTutorialPopupShown={firstTutShown}");
 
         ApplyTutorialFreeChestOverrides(chestIndex);
+
+        // [DIAG] Pre-RefreshUI snapshot of all click-relevant state.
+        LogPopupClickState("PRE-Refresh");
 
         // U4: Chest popup open SFX
         if (SFXManager.Instance != null)
@@ -149,6 +221,55 @@ public class ChestPopupController : MonoBehaviour
         popupRoot.SetActive(true);
         RefreshUI();
         PlayOpenAnimation();
+
+        // [DIAG] Post-Refresh snapshot. PlayOpenAnimation initially sets canvasgroup
+        // alpha=0 and tweens up — note that until the open animation finishes,
+        // _isAnimating is TRUE and OnOpenPressed early-returns from many paths,
+        // but the OpenButton click *does* still go through OnOpenPressed.
+        LogPopupClickState("POST-Refresh");
+    }
+
+    /// <summary>[DIAG TEMP] One-shot snapshot of every component that affects whether OpenButton/outsideClickBlocker can receive a click.</summary>
+    private void LogPopupClickState(string label)
+    {
+        // outsideClickBlocker
+        if (outsideClickBlocker == null)
+        {
+            Debug.LogWarning($"[ChestPopup][Show:{label}] outsideClickBlocker is NULL.");
+        }
+        else
+        {
+            var go = outsideClickBlocker.gameObject;
+            var img = outsideClickBlocker.GetComponent<Image>();
+            var cg = outsideClickBlocker.GetComponentInParent<CanvasGroup>();
+            Debug.Log($"[ChestPopup][Show:{label}] outsideClickBlocker activeSelf={go.activeSelf} activeInHierarchy={go.activeInHierarchy} interactable={outsideClickBlocker.interactable} " +
+                      $"img.raycastTarget={(img != null ? img.raycastTarget.ToString() : "<no Image>")} " +
+                      $"cg={(cg != null ? $"blocks={cg.blocksRaycasts} interactable={cg.interactable} alpha={cg.alpha} on={cg.gameObject.name}" : "<none>")}");
+        }
+        // popupPanel
+        if (popupPanel != null)
+        {
+            Debug.Log($"[ChestPopup][Show:{label}] popupPanel activeSelf={popupPanel.gameObject.activeSelf} activeInHierarchy={popupPanel.gameObject.activeInHierarchy}");
+        }
+        // openObj
+        if (openObj != null)
+        {
+            Button btn = openObj.GetComponent<Button>();
+            Image img = openObj.GetComponent<Image>();
+            CanvasGroup cg = openObj.GetComponentInParent<CanvasGroup>();
+            Debug.Log($"[ChestPopup][Show:{label}] openObj activeSelf={openObj.activeSelf} activeInHierarchy={openObj.activeInHierarchy} " +
+                      $"btn.interactable={(btn != null ? btn.interactable.ToString() : "<no Button>")} " +
+                      $"img.raycastTarget={(img != null ? img.raycastTarget.ToString() : "<no Image>")} " +
+                      $"cg={(cg != null ? $"blocks={cg.blocksRaycasts} interactable={cg.interactable} alpha={cg.alpha} on={cg.gameObject.name}" : "<none>")} " +
+                      $"isAnimating={_isAnimating}");
+        }
+        else
+        {
+            Debug.LogWarning($"[ChestPopup][Show:{label}] openObj is NULL.");
+        }
+        // popupRoot CanvasGroup (animation)
+        if (_rootCanvasGroup != null)
+            Debug.Log($"[ChestPopup][Show:{label}] popupRoot CG alpha={_rootCanvasGroup.alpha} interactable={_rootCanvasGroup.interactable} blocksRaycasts={_rootCanvasGroup.blocksRaycasts}");
     }
 
     /// <summary>
@@ -170,26 +291,53 @@ public class ChestPopupController : MonoBehaviour
 
         if (outsideClickBlocker != null)
         {
+            // IMPORTANT: never use Button.interactable=false to "block" outside-clicks.
+            // A disabled Button still SWALLOWS pointer events (its Image.raycastTarget
+            // stays true) — if the blocker overlaps the popup panel/OpenButton in any
+            // way, every click on OpenButton is eaten by the blocker and OpenButton
+            // appears dead.
+            //
+            // Instead:
+            //  • First tutorial popup → fully deactivate the blocker GameObject so it
+            //    cannot eat any clicks. There is no UI outside the panel anyway, so
+            //    "outside-tap close" is naturally disabled.
+            //  • All other popups → re-activate + re-arm the close listener.
+            GameObject blockerGo = outsideClickBlocker.gameObject;
+
             if (isTutorialFree)
             {
                 TutorialSaveData data = TutorialSaveData.Load();
                 if (!data.firstTutorialPopupShown)
                 {
                     // First tutorial popup ever — force the player through Open.
-                    outsideClickBlocker.interactable = false;
+                    // Disable the blocker entirely so it never intercepts OpenButton clicks.
+                    if (blockerGo.activeSelf) blockerGo.SetActive(false);
+                    outsideClickBlocker.interactable = true; // restored for next popup
                     data.firstTutorialPopupShown = true;
                     data.Save();
+                    Debug.Log($"[ChestPopup][Override] FIRST tutorial popup path → blocker.activeSelf={blockerGo.activeSelf} interactable={outsideClickBlocker.interactable} img.raycastTarget={GetRaycastTarget(blockerGo)}");
                 }
                 else
                 {
+                    if (!blockerGo.activeSelf) blockerGo.SetActive(true);
                     outsideClickBlocker.interactable = true;
+                    Debug.Log($"[ChestPopup][Override] SECOND/THIRD tutorial popup path → blocker.activeSelf={blockerGo.activeSelf} interactable={outsideClickBlocker.interactable} img.raycastTarget={GetRaycastTarget(blockerGo)}");
                 }
             }
             else
             {
+                if (!blockerGo.activeSelf) blockerGo.SetActive(true);
                 outsideClickBlocker.interactable = true;
+                Debug.Log($"[ChestPopup][Override] NORMAL popup path → blocker.activeSelf={blockerGo.activeSelf} interactable={outsideClickBlocker.interactable} img.raycastTarget={GetRaycastTarget(blockerGo)}");
             }
         }
+    }
+
+    private static string GetRaycastTarget(GameObject go)
+    {
+        if (go == null) return "<null>";
+        var img = go.GetComponent<Image>();
+        return img != null ? img.raycastTarget.ToString() : "<no Image>";
     }
 
     /// <summary>Legacy: shows first available chest.</summary>
@@ -197,6 +345,7 @@ public class ChestPopupController : MonoBehaviour
 
     public void ClosePopup()
     {
+        Debug.Log($"[ChestPopup][Click] Outside blocker clicked / close attempted (isAnimating={_isAnimating} IsPopupOpen={IsPopupOpen})");
         if (_isAnimating || !IsPopupOpen) return;
         PlayCloseAnimation();
     }
@@ -344,7 +493,15 @@ public class ChestPopupController : MonoBehaviour
         // some other code path drifts the state-driven visuals.
         if (cd.isTutorialFreeChest)
             ApplyTutorialFreeChestPopupState();
+
+        // [DIAG] Refresh end-state snapshot — which slots ended up visible + label.
+        Debug.Log($"[ChestPopup][Refresh] state={cd.state} isTutorialFree={cd.isTutorialFreeChest} " +
+                  $"timer={Active(timerTextObj)} startUnlock={Active(startUnlockObj)} halfTime={Active(halfTimeObj)} openNow={Active(openNowObj)} openObj={Active(openObj)} " +
+                  $"openLabel='{(openButtonText != null ? openButtonText.text : "<null>")}' " +
+                  $"blocker(active={(outsideClickBlocker != null ? outsideClickBlocker.gameObject.activeSelf.ToString() : "<null>")} interactable={(outsideClickBlocker != null ? outsideClickBlocker.interactable.ToString() : "<null>")})");
     }
+
+    private static string Active(GameObject go) => go == null ? "<null>" : go.activeSelf.ToString();
 
     /// <summary>
     /// Force the popup visuals into the tutorial/free configuration:
@@ -462,6 +619,35 @@ public class ChestPopupController : MonoBehaviour
 
     public void OnOpenPressed()
     {
+        // Diagnostic: verify the click is actually reaching the controller, plus
+        // dump the visual+save state in case the click is being eaten elsewhere.
+        Debug.Log("[ChestPopup][Click] OnOpenPressed ENTER");
+        if (openObj != null)
+        {
+            Button btn = openObj.GetComponent<Button>();
+            CanvasGroup cg = openObj.GetComponent<CanvasGroup>();
+            Debug.Log($"[ChestPopup][Click] OpenButton state: activeSelf={openObj.activeSelf} activeInHierarchy={openObj.activeInHierarchy} " +
+                      $"buttonInteractable={(btn != null ? btn.interactable.ToString() : "<no Button>")} " +
+                      $"canvasGroup={(cg != null ? $"alpha={cg.alpha} interactable={cg.interactable} blocksRaycasts={cg.blocksRaycasts}" : "<none>")} " +
+                      $"isAnimating={_isAnimating}");
+        }
+        if (outsideClickBlocker != null)
+        {
+            Image bImg = outsideClickBlocker.GetComponent<Image>();
+            Debug.Log($"[ChestPopup][Click] outsideClickBlocker: activeSelf={outsideClickBlocker.gameObject.activeSelf} " +
+                      $"activeInHierarchy={outsideClickBlocker.gameObject.activeInHierarchy} " +
+                      $"interactable={outsideClickBlocker.interactable} " +
+                      $"raycastTarget={(bImg != null ? bImg.raycastTarget.ToString() : "<no Image>")}");
+        }
+        if (ChestInventoryManager.Instance != null)
+        {
+            var diag = ChestInventoryManager.Instance.GetChestAt(_selectedIndex);
+            if (diag != null)
+                Debug.Log($"[ChestPopup][Click] Chest at idx {_selectedIndex}: type={diag.chestType} state={diag.state} isTutorialFreeChest={diag.isTutorialFreeChest}");
+            else
+                Debug.LogWarning($"[ChestPopup][Click] Chest at idx {_selectedIndex} is NULL.");
+        }
+
         ChestInventoryManager.EnsureInstance();
         ChestSessionManager.EnsureInstance();
         if (ChestInventoryManager.Instance == null) return;

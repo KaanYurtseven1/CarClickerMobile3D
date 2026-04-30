@@ -24,6 +24,22 @@ public class TopBarAnimator : MonoBehaviour
     /// <summary>Re-include a previously excluded CanvasGroup in compact/expand transitions.</summary>
     public void IncludeInCompact(CanvasGroup cg) { if (cg != null) _excludedGroups.Remove(cg); }
 
+    /// <summary>True if <paramref name="cg"/> is the tutorial-gated Btn_Garage group AND
+    /// the dedicated tutorial reveal has not yet handed ownership back to TopBarAnimator.
+    /// While true, SetCompact() must not fade/activate/deactivate this group —
+    /// TutorialManager owns its first reveal (see <see cref="TutorialGate.BtnGarageOwnedByTutorial"/>).
+    /// Once the dedicated reveal completes (or on cold reload past Step 19),
+    /// the gate flips false and TopBarAnimator manages Btn_Garage normally.</summary>
+    private bool IsBtnGarageGated(CanvasGroup cg)
+    {
+        if (cg == null) return false;
+        bool isBtnGarage =
+            (btnGarageGroup != null && cg == btnGarageGroup) ||
+            (btnGarageGroup == null && cg.gameObject.name == "Btn_Garage");
+        if (!isBtnGarage) return false;
+        return TutorialGate.BtnGarageOwnedByTutorial;
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
     {
@@ -39,6 +55,10 @@ public class TopBarAnimator : MonoBehaviour
 
     [Header("Hide When Compact (add CanvasGroup to each)")]
     [SerializeField] private CanvasGroup[] hideGroups;
+
+    [Header("Tutorial-Gated Groups (skipped until TutorialGate.GarageUnlocked)")]
+    [Tooltip("Optional. CanvasGroup of Btn_Garage. While TutorialGate.GarageUnlocked is false this group is left untouched by SetCompact() so the garage tutorial owns its first reveal. If left empty, name match 'Btn_Garage' is used as a fallback.")]
+    [SerializeField] private CanvasGroup btnGarageGroup;
 
     [Header("Heights")]
     [SerializeField] private float normalHeight = 220f;
@@ -59,6 +79,15 @@ public class TopBarAnimator : MonoBehaviour
 
     private void Awake()
     {
+        Debug.Log($"[Lifecycle][GarageDebug] TopBarAnimator Awake. hideGroups.Length={(hideGroups != null ? hideGroups.Length : 0)}");
+        if (hideGroups != null)
+        {
+            for (int i = 0; i < hideGroups.Length; i++)
+            {
+                if (hideGroups[i] == null) continue;
+                Debug.Log($"[TopBar][GarageDebug] hideGroups[{i}] = '{hideGroups[i].gameObject.name}' activeSelf={hideGroups[i].gameObject.activeSelf}");
+            }
+        }
         if (Instance == null)
             Instance = this;
         else if (Instance != this)
@@ -101,6 +130,7 @@ public class TopBarAnimator : MonoBehaviour
     public void SetCompact(bool compact)
     {
         if (isCompact == compact) return;
+        Debug.Log($"[TopBar][GarageDebug] SetCompact({compact}) called. Will toggle hideGroups GameObjects.\n" + System.Environment.StackTrace);
         isCompact = compact;
 
         // Kill previous sequence
@@ -143,6 +173,11 @@ public class TopBarAnimator : MonoBehaviour
                 foreach (var cg in hideGroups)
                 {
                     if (!cg || _excludedGroups.Contains(cg)) continue;
+                    if (IsBtnGarageGated(cg))
+                    {
+                        Debug.Log($"[TopBar][GarageDebug] SetCompact(true) SKIP Btn_Garage because TutorialGate.BtnGarageOwnedByTutorial=true. activeSelf={cg.gameObject.activeSelf}");
+                        continue;
+                    }
                     cg.interactable = false;
                     cg.blocksRaycasts = false;
                     // aktif kalsın ki fade çalışsın
@@ -156,6 +191,7 @@ public class TopBarAnimator : MonoBehaviour
                     foreach (var cg in hideGroups)
                     {
                         if (!cg || _excludedGroups.Contains(cg)) continue;
+                        if (IsBtnGarageGated(cg)) continue;
                         cg.gameObject.SetActive(false);
                     }
                 });
@@ -168,6 +204,19 @@ public class TopBarAnimator : MonoBehaviour
                     foreach (var cg in hideGroups)
                     {
                         if (!cg || _excludedGroups.Contains(cg)) continue;
+                        if (cg == btnGarageGroup || (btnGarageGroup == null && cg.gameObject.name == "Btn_Garage"))
+                        {
+                            Debug.Log($"[TopBar][GarageReveal] SetCompact(false) considering Btn_Garage: garageUnlocked={TutorialGate.GarageUnlocked}, ownedByTutorial={TutorialGate.BtnGarageOwnedByTutorial}, activeBefore={cg.gameObject.activeSelf}");
+                        }
+                        if (IsBtnGarageGated(cg))
+                        {
+                            Debug.Log("[TopBar][GarageReveal] SKIP Btn_Garage during generic TopBar restore");
+                            Debug.Log($"[TopBar][GarageDebug] SetCompact(false) SKIP Btn_Garage because TutorialGate.BtnGarageOwnedByTutorial=true. activeSelf={cg.gameObject.activeSelf}");
+                            continue;
+                        }
+                        Debug.Log($"[TopBar][GarageDebug] SetCompact(false) re-activating hideGroup '{cg.gameObject.name}' (was activeSelf={cg.gameObject.activeSelf})");
+                        if (cg.gameObject.name == "Btn_Garage")
+                            Debug.Log("[TopBar][GarageDebug] SetCompact(false) allow Btn_Garage because tutorial ownership released");
                         cg.gameObject.SetActive(true);
                         cg.alpha = 0f;
                         cg.interactable = false;
@@ -179,6 +228,7 @@ public class TopBarAnimator : MonoBehaviour
                 foreach (var cg in hideGroups)
                 {
                     if (!cg || _excludedGroups.Contains(cg)) continue;
+                    if (IsBtnGarageGated(cg)) continue;
                     seq.Join(cg.DOFade(1f, duration * 0.8f).SetEase(Ease.OutQuad));
                 }
 
@@ -188,6 +238,7 @@ public class TopBarAnimator : MonoBehaviour
                     foreach (var cg in hideGroups)
                     {
                         if (!cg || _excludedGroups.Contains(cg)) continue;
+                        if (IsBtnGarageGated(cg)) continue;
                         cg.interactable = true;
                         cg.blocksRaycasts = true;
                     }

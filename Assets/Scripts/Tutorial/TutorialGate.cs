@@ -19,6 +19,26 @@ public static class TutorialGate
     public static bool NitroUnlocked { get; private set; }
     public static bool ChestUnlocked { get; private set; }
     public static bool RadarUnlocked { get; private set; }
+    /// <summary>True once the Garage tutorial is queued / Btn_Garage is allowed to be visible.
+    /// Mirrored from <see cref="TutorialSaveData"/>: thirteenDismissed || garageTutorialQueued ||
+    /// fifteenDismissed || currentStepIndex &gt;= 20. Used by <see cref="TopBarAnimator"/> to
+    /// suppress the auto-restore of the Btn_Garage CanvasGroup until the player has cleared
+    /// the police-chase tutorial.</summary>
+    public static bool GarageUnlocked { get; private set; }
+    /// <summary>True while the Btn_Garage CanvasGroup is owned by <see cref="TutorialManager"/>'s
+    /// dedicated reveal pipeline (<c>ShowBtnGarageAnimated</c>/<c>ShowBtnGarageImmediate</c>).
+    /// While true, <see cref="TopBarAnimator"/>.SetCompact must SKIP Btn_Garage entirely so
+    /// the generic TopBar restore (e.g. after a police chase) cannot flicker the button on
+    /// before the dedicated reveal animation runs. Defaults to <c>true</c> so that any
+    /// subsystem waking before <see cref="TutorialManager"/> is conservative. Cleared after
+    /// the first reveal completes, or on load if the player is already past Step 19.</summary>
+    public static bool BtnGarageOwnedByTutorial { get; private set; } = true;
+    /// <summary>True once the player has completed the first Garage tutorial visit
+    /// (UI_Tutorial/Fifteen dismissed in NewGarage). Mirrors
+    /// <see cref="TutorialSaveData.fifteenDismissed"/>. Used by the BottomBar to
+    /// permanently unlock Bank/Blacklist (and gate Ranking together with
+    /// <c>RankingService.IsRankingUnlocked</c>) after the first garage visit.</summary>
+    public static bool BottomBarFullyUnlocked { get; private set; }
     /// <summary>True while police chase is fully suppressed by tutorial gating.</summary>
     public static bool PoliceLocked { get; private set; } = true;
 
@@ -51,6 +71,9 @@ public static class TutorialGate
         NitroUnlocked = false;
         ChestUnlocked = false;
         RadarUnlocked = false;
+        GarageUnlocked = false;
+        BtnGarageOwnedByTutorial = true;
+        BottomBarFullyUnlocked = false;
         PoliceLocked = true;
         GameplayFrozen = false;
         TutorialNitroActive = false;
@@ -85,6 +108,9 @@ public static class TutorialGate
             NitroUnlocked = false;
             ChestUnlocked = false;
             RadarUnlocked = false;
+            GarageUnlocked = false;
+            BtnGarageOwnedByTutorial = true;
+            BottomBarFullyUnlocked = false;
             PoliceLocked = true;
             TutorialFreeChestOpenedCount = 0;
             return;
@@ -93,6 +119,14 @@ public static class TutorialGate
         NitroUnlocked = data.nitroUnlocked;
         ChestUnlocked = data.chestUnlocked;
         RadarUnlocked = data.radarUnlocked;
+        GarageUnlocked = data.thirteenDismissed || data.garageTutorialQueued || data.fifteenDismissed || data.currentStepIndex >= 20;
+        // Btn_Garage is owned by the tutorial reveal until the dedicated reveal has
+        // run at least once. We treat any persisted progress past Step 19
+        // (garageTutorialQueued / fifteenDismissed / currentStepIndex>=20) as
+        // "already revealed" — on cold reload ShowBtnGarageImmediate handles the
+        // static placement and TopBarAnimator may freely manage compact/expand.
+        BtnGarageOwnedByTutorial = !(data.garageTutorialQueued || data.fifteenDismissed || data.currentStepIndex >= 20);
+        BottomBarFullyUnlocked = data.fifteenDismissed;
         PoliceLocked = data.policeLocked;
         TutorialFreeChestOpenedCount = Mathf.Clamp(data.tutorialFreeChestOpenedCount, 0, TutorialFreeChestQuota);
     }
@@ -100,6 +134,13 @@ public static class TutorialGate
     public static void SetNitroUnlocked(bool value) { NitroUnlocked = value; }
     public static void SetChestUnlocked(bool value) { ChestUnlocked = value; }
     public static void SetRadarUnlocked(bool value) { RadarUnlocked = value; }
+    public static void SetGarageUnlocked(bool value) { GarageUnlocked = value; }
+    /// <summary>Set by <see cref="TutorialManager"/> only. <c>true</c> while Btn_Garage's
+    /// first reveal is still owned by the tutorial; <c>false</c> after
+    /// <c>ShowBtnGarageAnimated</c>/<c>ShowBtnGarageImmediate</c> hands ownership to
+    /// <see cref="TopBarAnimator"/>.</summary>
+    public static void SetBtnGarageOwnedByTutorial(bool value) { BtnGarageOwnedByTutorial = value; }
+    public static void SetBottomBarFullyUnlocked(bool value) { BottomBarFullyUnlocked = value; }
     public static void SetPoliceLocked(bool value) { PoliceLocked = value; }
 
     public static void SetGameplayFrozen(bool value)

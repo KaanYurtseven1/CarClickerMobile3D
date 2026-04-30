@@ -64,10 +64,6 @@ public class PoliceCatchController : MonoBehaviour
     [Header("Chase Z Settings")]
     [Tooltip("Maximum chase duration (seconds). Surviving = escape.")]
     [SerializeField] private float maxChaseDuration = 12f;
-
-    [Header("Pre-Chase Delay")]
-    [Tooltip("Short buffer before chase actually starts. Gives Nitro Magnet VFX time to close.")]
-    [SerializeField] private float preChaseDelay = 0.5f;
     [Tooltip("Fallback flat police advance speed used only when progressiveDifficultyCurve has no keys.\n" +
              "Normally overridden by the progressive difficulty curve below.")]
     [SerializeField] private float policeBaseAdvancePerSecond = 0.73f;
@@ -454,6 +450,9 @@ public class PoliceCatchController : MonoBehaviour
     {
         if (_state != ChaseState.Chase) return;
 
+        // Tutorial freeze: pause chase progression while a tutorial popup is on-screen.
+        if (TutorialGate.GameplayFrozen) return;
+
         float dt = Time.deltaTime;
         _chaseTimer += dt;
 
@@ -593,15 +592,6 @@ public class PoliceCatchController : MonoBehaviour
 
     private IEnumerator ChaseSequence()
     {
-        // ── PRE-CHASE BUFFER ──
-        // Suspend Nitro Magnet immediately, then wait a short grace period
-        // so VFX can visually close before the chase takes over.
-        if (NitroMagnetController.Instance != null)
-            NitroMagnetController.Instance.SuspendForChase();
-
-        if (preChaseDelay > 0f)
-            yield return new WaitForSeconds(preChaseDelay);
-
         // ── ENTER ──
         _state = ChaseState.Enter;
         _chaseTimer = 0f;
@@ -1213,10 +1203,6 @@ public class PoliceCatchController : MonoBehaviour
     {
         if (BoostModeCinematicController.Instance != null)
             BoostModeCinematicController.Instance.ResumeCarShakeIfActive();
-
-        // Resume Nitro Magnet if it was suspended at chase start
-        if (NitroMagnetController.Instance != null)
-            NitroMagnetController.Instance.ResumeAfterChase();
     }
 
     private void StartSway()
@@ -1242,14 +1228,6 @@ public class PoliceCatchController : MonoBehaviour
         if (rewardSpawner == null || rewardSpawner.nitroCoinPrefab == null)
         {
             Debug.LogWarning("[PoliceCatch] rewardSpawner or its prefab is null — skipping reward.");
-            yield break;
-        }
-
-        // Tutorial gating: reward Nitro Coins must not appear until Nitro is unlocked.
-        // (Police chase itself is already gated upstream by TutorialGate.PoliceLocked,
-        // but this stays defensive in case a future flow allows chases pre-unlock.)
-        if (!TutorialGate.NitroUnlocked)
-        {
             yield break;
         }
 

@@ -11,7 +11,10 @@ public enum PoliceCatchReason
     RadarMissThreshold,
 
     /// <summary>AmbientHeatManager's hidden pressure crossed its configured threshold.</summary>
-    AmbientHeatThreshold
+    AmbientHeatThreshold,
+
+    /// <summary>Deterministic tutorial chase invoked by <see cref="PoliceCatchTrigger.ForceTutorialChase"/>.</summary>
+    Tutorial
 }
 
 /// <summary>
@@ -217,6 +220,36 @@ public class PoliceCatchTrigger : MonoBehaviour
         if (_deferredStartCoroutine != null)
             StopCoroutine(_deferredStartCoroutine);
         _deferredStartCoroutine = StartCoroutine(DeferredStartChase());
+    }
+
+    /// <summary>
+    /// Tutorial entry point: deterministically starts a police chase, bypassing
+    /// <see cref="TutorialGate.PoliceLocked"/>, the cooldown, and the pending
+    /// guard. Intended to be called exactly once during Step 17 of the tutorial.
+    /// Safe no-op if a chase is already active.
+    /// </summary>
+    public void ForceTutorialChase()
+    {
+        if (PoliceCatchController.Instance == null)
+        {
+            Debug.LogWarning("[PoliceCatchTrigger] ForceTutorialChase: PoliceCatchController.Instance is null.");
+            return;
+        }
+        if (PoliceCatchController.Instance.IsChaseActive)
+        {
+            if (enableDebugLogs)
+                Debug.Log("[PoliceCatchTrigger] ForceTutorialChase IGNORED — chase already active.");
+            return;
+        }
+
+        // Reset any stale pending state so a normal trigger can fire later.
+        _pendingPoliceCatch = false;
+        _lastTriggerReason = PoliceCatchReason.Tutorial;
+
+        if (enableDebugLogs)
+            Debug.Log("[PoliceCatchTrigger] ForceTutorialChase ACCEPTED — starting chase NOW.");
+
+        PoliceCatchController.Instance.StartChase();
     }
 
     // ==================== PRIVATE EVENT HANDLERS ====================
